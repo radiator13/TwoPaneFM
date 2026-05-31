@@ -61,8 +61,6 @@ fun ApkBrowserScreen(
     var isBusy by remember { mutableStateOf(false) }
 
     // Dialog states
-    var showDexMenu by remember { mutableStateOf(false) }
-    var selectedDex by remember { mutableStateOf("") }
     var showImageViewer by remember { mutableStateOf(false) }
     var imageViewerPath by remember { mutableStateOf("") }
     var showManifestDialog by remember { mutableStateOf(false) }
@@ -132,17 +130,27 @@ fun ApkBrowserScreen(
             ApkAction.BROWSE_ENTRIES -> { /* already showing entries */ }
 
             ApkAction.DISASSEMBLE_SMALI -> {
-                if (selectedDex.isEmpty()) {
-                    // Find first DEX
-                    val firstDex = entries.find { it.category == FileCategory.DEX }?.name
-                    if (firstDex != null) {
-                        selectedDex = firstDex
-                        showDexMenu = true
-                    } else {
+                scope.launch {
+                    val dex = entries.find { it.category == FileCategory.DEX }
+                    if (dex == null) {
                         statusText = "No DEX files found"
+                        return@launch
                     }
-                } else {
-                    showDexMenu = true
+                    isBusy = true; statusText = "Disassembling ${dex.name}..."
+                    val dexDir = File(ctx.cacheDir, "dex_${System.currentTimeMillis()}")
+                    dexDir.mkdirs()
+                    val smaliDir = File(ctx.cacheDir, "smali_${System.currentTimeMillis()}")
+                    val result = withContext(Dispatchers.IO) {
+                        ZipFile(File(apkPath)).use { zip ->
+                            val ze = zip.getEntry(dex.name) ?: return@withContext Result.failure(Exception("DEX not found"))
+                            val dexFile = File(dexDir, dex.name)
+                            zip.getInputStream(ze).use { input -> dexFile.outputStream().use { output -> input.copyTo(output) } }
+                            EmbeddedTools.disassembleDex(dexFile.absolutePath, smaliDir.absolutePath)
+                        }
+                    }
+                    result.onSuccess { statusText = it; viewModel.navigateToSmaliBrowser(smaliDir.absolutePath, dex.name) }
+                    result.onFailure { statusText = "Error: ${it.message}" }
+                    isBusy = false
                 }
             }
             ApkAction.DECOMPILE_JAVA, ApkAction.DECOMPILE_FULL -> {
@@ -394,8 +402,24 @@ fun ApkBrowserScreen(
                                 if (!entry.isDirectory) {
                                     when (entry.category) {
                                         FileCategory.DEX -> {
-                                            selectedDex = entry.name
-                                            showDexMenu = true
+                                            // Direct action: disassemble to smali
+                                            scope.launch {
+                                                isBusy = true; statusText = "Disassembling ${entry.name}..."
+                                                val dexDir = File(ctx.cacheDir, "dex_${System.currentTimeMillis()}")
+                                                dexDir.mkdirs()
+                                                val smaliDir = File(ctx.cacheDir, "smali_${System.currentTimeMillis()}")
+                                                val result = withContext(Dispatchers.IO) {
+                                                    ZipFile(File(apkPath)).use { zip ->
+                                                        val ze = zip.getEntry(entry.name) ?: return@withContext Result.failure(Exception("DEX not found"))
+                                                        val dexFile = File(dexDir, entry.name)
+                                                        zip.getInputStream(ze).use { input -> dexFile.outputStream().use { output -> input.copyTo(output) } }
+                                                        EmbeddedTools.disassembleDex(dexFile.absolutePath, smaliDir.absolutePath)
+                                                    }
+                                                }
+                                                result.onSuccess { statusText = it; viewModel.navigateToSmaliBrowser(smaliDir.absolutePath, entry.name) }
+                                                result.onFailure { statusText = "Error: ${it.message}" }
+                                                isBusy = false
+                                            }
                                         }
                                         FileCategory.IMAGE -> {
                                             scope.launch {
@@ -454,76 +478,6 @@ fun ApkBrowserScreen(
     }
 
     // ── Dialogs ──
-
-    if (showDexMenu) {
-        AlertDialog(
-            onDismissRequest = { showDexMenu = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Code, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(selectedDex.substringAfterLast("/"), style = MaterialTheme.typography.titleMedium)
-                }
-            },
-            text = { Text("Choose action for this DEX file") },
-            confirmButton = {
-                Column {
-                    TextButton(onClick = {
-                        showDexMenu = false
-                        scope.launch {
-                            isBusy = true; statusText = "Disassembling $selectedDex..."
-                            val dexDir = File(ctx.cacheDir, "dex_${System.currentTimeMillis()}")
-                            dexDir.mkdirs()
-                            val smaliDir = File(ctx.cacheDir, "smali_${System.currentTimeMillis()}")
-                            val result = withContext(Dispatchers.IO) {
-                                ZipFile(File(apkPath)).use { zip ->
-                                    val ze = zip.getEntry(selectedDex) ?: return@withContext Result.failure(Exception("DEX not found"))
-                                    val dexFile = File(dexDir, selectedDex)
-                                    zip.getInputStream(ze).use { input -> dexFile.outputStream().use { output -> input.copyTo(output) } }
-                                    EmbeddedTools.disassembleDex(dexFile.absolutePath, smaliDir.absolutePath)
-                                }
-                            }
-                            result.onSuccess { statusText = it; viewModel.navigateToSmaliBrowser(smaliDir.absolutePath, selectedDex) }
-                            result.onFailure { statusText = "Error: ${it.message}" }
-                            isBusy = false
-                        }
-                    }) {
-                        Icon(Icons.Default.Code, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Disassemble to Smali", color = MaterialTheme.colorScheme.primary)
-                    }
-                    TextButton(onClick = {
-                        showDexMenu = false
-                        scope.launch {
-                            isBusy = true; statusText = "Decompiling $selectedDex with JADX..."
-                            val dexDir = File(ctx.cacheDir, "dex_${System.currentTimeMillis()}")
-                            dexDir.mkdirs()
-                            val javaDir = File(ctx.cacheDir, "java_${System.currentTimeMillis()}")
-                            val result = withContext(Dispatchers.IO) {
-                                ZipFile(File(apkPath)).use { zip ->
-                                    val ze = zip.getEntry(selectedDex) ?: return@withContext Result.failure(Exception("DEX not found"))
-                                    val dexFile = File(dexDir, selectedDex)
-                                    zip.getInputStream(ze).use { input -> dexFile.outputStream().use { output -> input.copyTo(output) } }
-                                    EmbeddedTools.decompileWithJadx(dexFile.absolutePath, javaDir.absolutePath)
-                                }
-                            }
-                            result.onSuccess {
-                                decompiledDir = javaDir.absolutePath; statusText = it
-                                viewModel.navigateToJavaBrowser(javaDir.absolutePath)
-                            }
-                            result.onFailure { statusText = "Error: ${it.message}" }
-                            isBusy = false
-                        }
-                    }) {
-                        Icon(Icons.Default.Coffee, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Decompile to Java (JADX)", color = MaterialTheme.colorScheme.secondary)
-                    }
-                    TextButton(onClick = { showDexMenu = false }) { Text("Cancel") }
-                }
-            }
-        )
-    }
 
     if (showManifestDialog) {
         var manifestText by remember { mutableStateOf("") }

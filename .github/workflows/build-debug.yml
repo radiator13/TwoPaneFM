@@ -1,0 +1,120 @@
+name: Build Debug APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GRADLE_OPTS: >-
+    -Dorg.gradle.daemon=true
+    -Dorg.gradle.parallel=true
+    -Dorg.gradle.caching=true
+    -Dorg.gradle.configuration-cache=true
+    -Dorg.gradle.workers.max=4
+    -Dkotlin.incremental=true
+    -Dkotlin.compiler.execution.strategy=in-process
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate Gradle Wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master' }}
+
+      - name: Cache Android SDK
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/Android/Sdk/platforms
+            ~/Android/Sdk/build-tools
+            ~/Android/Sdk/ndk
+            ~/Android/Sdk/cmdline-tools
+          key: android-sdk-${{ runner.os }}-34-34.0.0
+          restore-keys: |
+            android-sdk-${{ runner.os }}-
+
+      - name: Cache Kotlin Compilation
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.kotlin
+            ~/.konan
+          key: kotlin-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            kotlin-${{ runner.os }}-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Override gradle.properties for CI
+        run: |
+          cat > gradle.properties << 'EOF'
+          org.gradle.jvmargs=-Xmx13g -XX:+UseParallelGC -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8 -Dkotlin.daemon.jvm.options=-Xmx4g
+          org.gradle.caching=true
+          org.gradle.configuration-cache=true
+          org.gradle.parallel=true
+          org.gradle.workers.max=4
+          org.gradle.vfs.watch=false
+          android.useAndroidX=true
+          kotlin.code.style=official
+          android.nonTransitiveRClass=true
+          kotlin.incremental=true
+          EOF
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+
+      - name: Get commit info
+        id: commit
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "sha_full=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Rename APK with commit hash
+        id: apk
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          if [ -z "$APK_PATH" ]; then
+            echo "::error::No APK found in build output"
+            exit 1
+          fi
+          NEW_NAME="TwoPaneFM-debug-${{ steps.commit.outputs.sha_short }}.apk"
+          cp "$APK_PATH" "$NEW_NAME"
+          echo "path=$NEW_NAME" >> "$GITHUB_OUTPUT"
+          echo "original=$APK_PATH" >> "$GITHUB_OUTPUT"
+          ls -lh "$NEW_NAME"
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: TwoPaneFM-debug-${{ steps.commit.outputs.sha_short }}
+          path: ${{ steps.apk.outputs.path }}
+          retention-days: 30
+          compression-level: 1
+          if-no-files-found: error

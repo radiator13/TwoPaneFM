@@ -1,10 +1,9 @@
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
-use jni::sys::{jboolean, jbyteArray, int as jint, jintArray, jlong, jlongArray, jstring};
-use std::ffi::CStr;
+use jni::sys::{jboolean, jbyteArray, jint, jintArray, jlong, jlongArray, jstring};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // ═══════════════════════════════════════════════════════════════
 // 1. DIRECTORY SCAN — readdir + stat in one native call
@@ -169,11 +168,13 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeGetSizes(
         Some(d) => d,
         None => return std::ptr::null_mut(),
     };
-    let arr = env.new_long_array(dr.sizes.len() as i32).unwrap_or(std::ptr::null_mut());
-    if !arr.is_null() {
-        let _ = env.set_long_array_region(arr, 0, &dr.sizes);
+    match env.new_long_array(dr.sizes.len() as i32) {
+        Ok(arr) => {
+            let _ = env.set_long_array_region(&arr, 0, &dr.sizes);
+            arr.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
     }
-    arr
 }
 
 #[no_mangle]
@@ -184,11 +185,13 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeGetMtimes(
         Some(d) => d,
         None => return std::ptr::null_mut(),
     };
-    let arr = env.new_long_array(dr.mtimes.len() as i32).unwrap_or(std::ptr::null_mut());
-    if !arr.is_null() {
-        let _ = env.set_long_array_region(arr, 0, &dr.mtimes);
+    match env.new_long_array(dr.mtimes.len() as i32) {
+        Ok(arr) => {
+            let _ = env.set_long_array_region(&arr, 0, &dr.mtimes);
+            arr.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
     }
-    arr
 }
 
 #[no_mangle]
@@ -199,11 +202,13 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeGetFlags(
         Some(d) => d,
         None => return std::ptr::null_mut(),
     };
-    let arr = env.new_int_array(dr.flags.len() as i32).unwrap_or(std::ptr::null_mut());
-    if !arr.is_null() {
-        let _ = env.set_int_array_region(arr, 0, &dr.flags);
+    match env.new_int_array(dr.flags.len() as i32) {
+        Ok(arr) => {
+            let _ = env.set_int_array_region(&arr, 0, &dr.flags);
+            arr.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
     }
-    arr
 }
 
 #[no_mangle]
@@ -214,13 +219,14 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeGetNames(
         Some(d) => d,
         None => return std::ptr::null_mut(),
     };
-    let arr = env.new_byte_array(dr.names_buf.len() as i32).unwrap_or(std::ptr::null_mut());
-    if !arr.is_null() {
-        // SAFETY: names_buf is plain bytes, cast is safe
-        let signed: &[i8] = unsafe { std::slice::from_raw_parts(dr.names_buf.as_ptr() as *const i8, dr.names_buf.len()) };
-        let _ = env.set_byte_array_region(arr, 0, signed);
+    match env.new_byte_array(dr.names_buf.len() as i32) {
+        Ok(arr) => {
+            let signed: &[i8] = unsafe { std::slice::from_raw_parts(dr.names_buf.as_ptr() as *const i8, dr.names_buf.len()) };
+            let _ = env.set_byte_array_region(&arr, 0, signed);
+            arr.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
     }
-    arr
 }
 
 #[no_mangle]
@@ -231,11 +237,13 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeGetNameOffsets(
         Some(d) => d,
         None => return std::ptr::null_mut(),
     };
-    let arr = env.new_int_array(dr.name_offsets.len() as i32).unwrap_or(std::ptr::null_mut());
-    if !arr.is_null() {
-        let _ = env.set_int_array_region(arr, 0, &dr.name_offsets);
+    match env.new_int_array(dr.name_offsets.len() as i32) {
+        Ok(arr) => {
+            let _ = env.set_int_array_region(&arr, 0, &dr.name_offsets);
+            arr.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
     }
-    arr
 }
 
 #[no_mangle]
@@ -246,11 +254,13 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeGetNameLens(
         Some(d) => d,
         None => return std::ptr::null_mut(),
     };
-    let arr = env.new_int_array(dr.name_lens.len() as i32).unwrap_or(std::ptr::null_mut());
-    if !arr.is_null() {
-        let _ = env.set_int_array_region(arr, 0, &dr.name_lens);
+    match env.new_int_array(dr.name_lens.len() as i32) {
+        Ok(arr) => {
+            let _ = env.set_int_array_region(&arr, 0, &dr.name_lens);
+            arr.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
     }
-    arr
 }
 
 #[no_mangle]
@@ -348,9 +358,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), i32> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::DirBuilder::new()
-            .mode(metadata.permissions().mode() & 0o777)
-            .create(dst);
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = fs::DirBuilder::new();
+        builder.mode(metadata.permissions().mode() & 0o777);
+        let _ = builder.create(dst);
     }
     #[cfg(not(unix))]
     {
@@ -784,4 +795,324 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeStatMode(
     }
     #[cfg(not(unix))]
     { -1 }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 11. TEXT ENGINE — mmap-based file reading, line indexing,
+//     search, and write-back for the virtualized text editor
+// ═══════════════════════════════════════════════════════════════
+
+use std::io::{Write, BufWriter};
+
+struct TextBuffer {
+    data: Vec<u8>,
+    line_offsets: Vec<u32>,  // byte offset of each line start
+    path: String,
+}
+
+const MAX_TEXT_BUFFERS: usize = 8;
+static mut TEXT_BUFFERS: [Option<TextBuffer>; MAX_TEXT_BUFFERS] = [
+    None, None, None, None, None, None, None, None,
+];
+
+fn alloc_text_slot() -> Option<usize> {
+    for i in 0..MAX_TEXT_BUFFERS {
+        if unsafe { TEXT_BUFFERS[i].is_none() } {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn get_text_buf(idx: usize) -> Option<&'static TextBuffer> {
+    if idx < MAX_TEXT_BUFFERS {
+        unsafe { TEXT_BUFFERS[idx].as_ref() }
+    } else {
+        None
+    }
+}
+
+fn get_text_buf_mut(idx: usize) -> Option<&'static mut TextBuffer> {
+    if idx < MAX_TEXT_BUFFERS {
+        unsafe { TEXT_BUFFERS[idx].as_mut() }
+    } else {
+        None
+    }
+}
+
+fn build_line_offsets(data: &[u8]) -> Vec<u32> {
+    let mut offsets = Vec::with_capacity(data.len() / 40);
+    offsets.push(0);
+    for (i, &b) in data.iter().enumerate() {
+        if b == b'\n' && i + 1 < data.len() {
+            offsets.push((i + 1) as u32);
+        }
+    }
+    offsets
+}
+
+/// Open a text file, read into memory, build line index.
+/// Returns a handle (>= 0) or -1 on error.
+#[no_mangle]
+pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextOpen(
+    mut env: JNIEnv,
+    _cls: JClass,
+    jpath: JString,
+) -> jint {
+    let path: String = match env.get_string(&jpath) {
+        Ok(s) => s.into(),
+        Err(_) => return -1,
+    };
+    let data = match std::fs::read(&path) {
+        Ok(d) => d,
+        Err(_) => return -1,
+    };
+    let line_offsets = build_line_offsets(&data);
+    let slot = match alloc_text_slot() {
+        Some(s) => s,
+        None => return -1,
+    };
+    unsafe {
+        TEXT_BUFFERS[slot] = Some(TextBuffer {
+            data,
+            line_offsets,
+            path,
+        });
+    }
+    slot as jint
+}
+
+/// Return total line count.
+#[no_mangle]
+pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextLineCount(
+    _env: JNIEnv,
+    _cls: JClass,
+    handle: jint,
+) -> jint {
+    match get_text_buf(handle as usize) {
+        Some(tb) => tb.line_offsets.len() as jint,
+        None => 0,
+    }
+}
+
+/// Return a single line as a Java string (0-indexed).
+#[no_mangle]
+pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextGetLine(
+    mut env: JNIEnv,
+    _cls: JClass,
+    handle: jint,
+    line_num: jint,
+) -> jstring {
+    let tb = match get_text_buf(handle as usize) {
+        Some(b) => b,
+        None => return std::ptr::null_mut(),
+    };
+    let idx = line_num as usize;
+    if idx >= tb.line_offsets.len() {
+        return std::ptr::null_mut();
+    }
+    let start = tb.line_offsets[idx] as usize;
+    let end = if idx + 1 < tb.line_offsets.len() {
+        // Strip trailing \n
+        let raw_end = tb.line_offsets[idx + 1] as usize;
+        if raw_end > start && tb.data[raw_end - 1] == b'\n' {
+            raw_end - 1
+        } else {
+            raw_end
+        }
+    } else {
+        tb.data.len()
+    };
+    let line_bytes = &tb.data[start..end];
+    let line_str = std::str::from_utf8(line_bytes).unwrap_or("");
+    match env.new_string(line_str) {
+        Ok(s) => s.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Return the byte length of a line (for scroll position calculation).
+#[no_mangle]
+pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextLineByteLen(
+    _env: JNIEnv,
+    _cls: JClass,
+    handle: jint,
+    line_num: jint,
+) -> jint {
+    let tb = match get_text_buf(handle as usize) {
+        Some(b) => b,
+        None => return 0,
+    };
+    let idx = line_num as usize;
+    if idx >= tb.line_offsets.len() {
+        return 0;
+    }
+    let start = tb.line_offsets[idx] as usize;
+    let end = if idx + 1 < tb.line_offsets.len() {
+        tb.line_offsets[idx + 1] as usize
+    } else {
+        tb.data.len()
+    };
+    (end - start) as jint
+}
+
+/// Search for a string starting from a given line. Returns the line number or -1.
+/// direction: 1 = forward, -1 = backward
+#[no_mangle]
+pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextSearch(
+    mut env: JNIEnv,
+    _cls: JClass,
+    handle: jint,
+    jquery: JString,
+    from_line: jint,
+    direction: jint,
+    case_sensitive: jboolean,
+) -> jint {
+    let tb = match get_text_buf(handle as usize) {
+        Some(b) => b,
+        None => return -1,
+    };
+    let query: String = match env.get_string(&jquery) {
+        Ok(s) => s.into(),
+        Err(_) => return -1,
+    };
+    if query.is_empty() {
+        return -1;
+    }
+    let line_count = tb.line_offsets.len() as i32;
+    let query_lower = if case_sensitive == 0 { query.to_lowercase() } else { query.clone() };
+
+    if direction >= 0 {
+        // Forward search
+        let start = if from_line < 0 { 0 } else { from_line };
+        for i in start..line_count {
+            let line_start = tb.line_offsets[i as usize] as usize;
+            let line_end = if (i as usize + 1) < tb.line_offsets.len() {
+                tb.line_offsets[i as usize + 1] as usize
+            } else {
+                tb.data.len()
+            };
+            let line = std::str::from_utf8(&tb.data[line_start..line_end]).unwrap_or("");
+            let haystack = if case_sensitive == 0 { line.to_lowercase() } else { line.to_string() };
+            if haystack.contains(&query_lower) {
+                return i;
+            }
+        }
+    } else {
+        // Backward search
+        let start = if from_line < 0 { line_count - 1 } else { from_line.min(line_count - 1) };
+        for i in (0..=start).rev() {
+            let line_start = tb.line_offsets[i as usize] as usize;
+            let line_end = if (i as usize + 1) < tb.line_offsets.len() {
+                tb.line_offsets[i as usize + 1] as usize
+            } else {
+                tb.data.len()
+            };
+            let line = std::str::from_utf8(&tb.data[line_start..line_end]).unwrap_or("");
+            let haystack = if case_sensitive == 0 { line.to_lowercase() } else { line.to_string() };
+            if haystack.contains(&query_lower) {
+                return i;
+            }
+        }
+    }
+    -1
+}
+
+/// Update the content of a text buffer (after editing in Kotlin).
+/// This replaces the entire buffer content and rebuilds line offsets.
+#[no_mangle]
+pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextSetContent(
+    mut env: JNIEnv,
+    _cls: JClass,
+    handle: jint,
+    jcontent: JString,
+) -> jboolean {
+    let content: String = match env.get_string(&jcontent) {
+        Ok(s) => s.into(),
+        Err(_) => return 0,
+    };
+    let tb = match get_text_buf_mut(handle as usize) {
+        Some(b) => b,
+        None => return 0,
+    };
+    tb.data = content.into_bytes();
+    tb.line_offsets = build_line_offsets(&tb.data);
+    1
+}
+
+/// Save the buffer content to the original file path.
+#[no_mangle]
+pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextSave(
+    _env: JNIEnv,
+    _cls: JClass,
+    handle: jint,
+) -> jboolean {
+    let tb = match get_text_buf(handle as usize) {
+        Some(b) => b,
+        None => return 0,
+    };
+    let file = match std::fs::File::create(&tb.path) {
+        Ok(f) => f,
+        Err(_) => return 0,
+    };
+    let mut writer = BufWriter::new(file);
+    if writer.write_all(&tb.data).is_ok() && writer.flush().is_ok() {
+        1
+    } else {
+        0
+    }
+}
+
+/// Save buffer content to a different path (Save As).
+#[no_mangle]
+pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextSaveAs(
+    mut env: JNIEnv,
+    _cls: JClass,
+    handle: jint,
+    jpath: JString,
+) -> jboolean {
+    let path: String = match env.get_string(&jpath) {
+        Ok(s) => s.into(),
+        Err(_) => return 0,
+    };
+    let tb = match get_text_buf(handle as usize) {
+        Some(b) => b,
+        None => return 0,
+    };
+    let file = match std::fs::File::create(&path) {
+        Ok(f) => f,
+        Err(_) => return 0,
+    };
+    let mut writer = BufWriter::new(file);
+    if writer.write_all(&tb.data).is_ok() && writer.flush().is_ok() {
+        1
+    } else {
+        0
+    }
+}
+
+/// Close a text buffer, freeing its memory.
+#[no_mangle]
+pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextClose(
+    _env: JNIEnv,
+    _cls: JClass,
+    handle: jint,
+) {
+    let idx = handle as usize;
+    if idx < MAX_TEXT_BUFFERS {
+        unsafe { TEXT_BUFFERS[idx] = None; }
+    }
+}
+
+/// Get total byte size of the buffer (for file size display).
+#[no_mangle]
+pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextSize(
+    _env: JNIEnv,
+    _cls: JClass,
+    handle: jint,
+) -> jlong {
+    match get_text_buf(handle as usize) {
+        Some(tb) => tb.data.len() as jlong,
+        None => 0,
+    }
 }

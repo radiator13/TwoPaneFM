@@ -47,6 +47,18 @@ object NativeFileOps {
     external fun nativeSearch(path: String, query: String): Int
     private external fun nativeGetSearchResult(idx: Int): String?
 
+    // ── Text engine (native-backed) ──
+    external fun nativeTextOpen(path: String): Int
+    external fun nativeTextLineCount(handle: Int): Int
+    external fun nativeTextGetLine(handle: Int, lineNum: Int): String?
+    external fun nativeTextLineByteLen(handle: Int, lineNum: Int): Int
+    external fun nativeTextSearch(handle: Int, query: String, fromLine: Int, direction: Int, caseSensitive: Boolean): Int
+    external fun nativeTextSetContent(handle: Int, content: String): Boolean
+    external fun nativeTextSave(handle: Int): Boolean
+    external fun nativeTextSaveAs(handle: Int, path: String): Boolean
+    external fun nativeTextClose(handle: Int)
+    external fun nativeTextSize(handle: Int): Long
+
     /**
      * Scan a directory and return FileEntry list.
      * All stat() calls happen in native code — single JNI round-trip.
