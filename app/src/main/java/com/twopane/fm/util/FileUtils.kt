@@ -18,6 +18,7 @@ object FileUtils {
         path: String,
         showHidden: Boolean = false,
         sortOrder: SortOrder = SortOrder.NAME,
+        sortAscending: Boolean = true,
         filter: FilterType = FilterType.ALL
     ): List<FileEntry> {
         val dir = File(path)
@@ -38,7 +39,7 @@ object FileUtils {
         }
 
         val sorted = entries.sortedWith(
-            compareBy<FileEntry> { !it.isDirectory }.then(sortComparator(sortOrder))
+            compareBy<FileEntry> { !it.isDirectory }.then(sortComparator(sortOrder, sortAscending))
         )
 
         return parentEntry + sorted
@@ -236,12 +237,15 @@ object FileUtils {
         FilterType.ALL -> true
     }
 
-    private fun sortComparator(order: SortOrder): Comparator<FileEntry> = when (order) {
-        SortOrder.NAME -> compareBy { it.name.lowercase() }
-        SortOrder.TYPE -> compareBy<FileEntry> {
-            it.name.substringAfterLast('.', "").lowercase()
-        }.thenBy { it.name.lowercase() }
-        SortOrder.SIZE -> compareBy { it.size }
-        SortOrder.DATE -> compareByDescending { it.lastModified }
+    private fun sortComparator(order: SortOrder, ascending: Boolean): Comparator<FileEntry> {
+        val base = when (order) {
+            SortOrder.NAME -> compareBy<FileEntry> { it.name.lowercase() }
+            SortOrder.TYPE -> compareBy<FileEntry> {
+                it.name.substringAfterLast('.', "").lowercase()
+            }.thenBy { it.name.lowercase() }
+            SortOrder.SIZE -> compareBy { it.size }
+            SortOrder.DATE -> compareBy { it.lastModified }
+        }
+        return if (ascending) base else base.reversed()
     }
 }

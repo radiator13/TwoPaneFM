@@ -84,6 +84,10 @@ class FileExplorerViewModel(application: Application) : AndroidViewModel(applica
     var showSearchDialog by mutableStateOf(false)
     var searchQueryText by mutableStateOf("")
 
+    // Batch rename
+    var showBatchRenameDialog by mutableStateOf(false)
+    var batchRenameTarget by mutableStateOf(PaneSide.LEFT)
+
     // APK viewer
     var showApkViewer by mutableStateOf(false)
     var apkViewerPath by mutableStateOf("")
@@ -107,12 +111,28 @@ class FileExplorerViewModel(application: Application) : AndroidViewModel(applica
     private val _showHidden = mutableStateOf(prefs.showHidden)
     var showHidden: Boolean
         get() = _showHidden.value
-        set(v) { _showHidden.value = v; prefs.showHidden = v }
+        set(v) {
+            _showHidden.value = v
+            prefs.showHidden = v
+            for (side in PaneSide.entries) loadDirectory(side, getPane(side).currentPath)
+        }
 
     private val _sortOrder = mutableStateOf(prefs.sortOrder)
     var sortOrder: SortOrder
         get() = _sortOrder.value
-        set(v) { _sortOrder.value = v; prefs.sortOrder = v }
+        set(v) {
+            _sortOrder.value = v
+            prefs.sortOrder = v
+            for (side in PaneSide.entries) loadDirectory(side, getPane(side).currentPath)
+        }
+
+    private val _sortAscending = mutableStateOf(true)
+    var sortAscending: Boolean
+        get() = _sortAscending.value
+        set(v) {
+            _sortAscending.value = v
+            for (side in PaneSide.entries) loadDirectory(side, getPane(side).currentPath)
+        }
 
     private val _themeMode = mutableStateOf(prefs.themeMode)
     var themeMode: ThemeMode
@@ -138,7 +158,7 @@ class FileExplorerViewModel(application: Application) : AndroidViewModel(applica
     enum class PaneSide { LEFT, RIGHT }
     enum class Screen {
         FILE_MANAGER, APK_BROWSER, SMALI_BROWSER, SMALI_EDITOR,
-        TEXT_EDITOR, JAVA_BROWSER, APK_INFO, PERMISSION_LIST, APK_TOOL_RESULT
+        TEXT_EDITOR, JAVA_BROWSER, APK_INFO, PERMISSION_LIST, APK_TOOL_RESULT, TEXT_DIFF
     }
 
     enum class ToolOp { SIGN, ALIGN, REBUILD, REMOVE_VERIFY, CLONE }
@@ -161,6 +181,11 @@ class FileExplorerViewModel(application: Application) : AndroidViewModel(applica
     var editorWorkingDir by mutableStateOf("")
         private set
     var javaBrowserDir by mutableStateOf("")
+        private set
+
+    var diffPath1 by mutableStateOf("")
+        private set
+    var diffPath2 by mutableStateOf("")
         private set
 
     // Tool operation state
@@ -201,6 +226,12 @@ class FileExplorerViewModel(application: Application) : AndroidViewModel(applica
         textEditorPath = path
         textEditorReadOnly = readOnly
         currentScreen = Screen.TEXT_EDITOR
+    }
+
+    fun navigateToTextDiff(path1: String, path2: String) {
+        diffPath1 = path1
+        diffPath2 = path2
+        currentScreen = Screen.TEXT_DIFF
     }
 
     fun navigateToJavaBrowser(javaDir: String) {
@@ -336,6 +367,7 @@ class FileExplorerViewModel(application: Application) : AndroidViewModel(applica
             Screen.JAVA_BROWSER -> currentScreen = Screen.APK_BROWSER
             Screen.SMALI_EDITOR -> currentScreen = Screen.SMALI_BROWSER
             Screen.SMALI_BROWSER -> currentScreen = Screen.APK_BROWSER
+            Screen.TEXT_DIFF -> currentScreen = Screen.FILE_MANAGER
             Screen.APK_BROWSER -> {
                 currentScreen = Screen.FILE_MANAGER
                 clearApkState()
@@ -512,7 +544,7 @@ class FileExplorerViewModel(application: Application) : AndroidViewModel(applica
             updatePane(side) { copy(isLoading = true) }
 
             val files = withContext(Dispatchers.IO) {
-                FileUtils.listFiles(path, showHidden, sortOrder, activeFilter)
+                FileUtils.listFiles(path, showHidden, sortOrder, sortAscending, activeFilter)
             }
 
             val state = getPane(side)
@@ -781,8 +813,13 @@ class FileExplorerViewModel(application: Application) : AndroidViewModel(applica
                 val file = File(path)
                 val parent = file.parent ?: continue
                 affectedDirs.add(parent)
-                val trashName = ".twopane_tmp_${System.currentTimeMillis()}_${file.name}"
-                val trashFile = File(parent, trashName)
+                val trashDir = File(parent, ".trash")
+                if (!trashDir.exists()) trashDir.mkdirs()
+                val trashFile = if (File(trashDir, file.name).exists()) {
+                    File(trashDir, "${file.nameWithoutExtension}_${System.currentTimeMillis()}.${file.extension}")
+                } else {
+                    File(trashDir, file.name)
+                }
                 if (file.renameTo(trashFile)) {
                     successCount++
                     trashMap[path] = trashFile.absolutePath
@@ -804,26 +841,12 @@ class FileExplorerViewModel(application: Application) : AndroidViewModel(applica
 
             trashBuffer = trashMap
             canUndo = trashMap.isNotEmpty()
-            lastUndoMessage = "Deleted ${trashMap.size} item(s)"
-
-            if (trashMap.isNotEmpty()) {
-                val snapshot = trashMap.toMap()
-                launch {
-                    kotlinx.coroutines.delay(30_000)
-                    for ((_, trashPath) in snapshot) {
-                        FileUtils.delete(trashPath)
-                    }
-                    if (trashBuffer.keys == snapshot.keys) {
-                        trashBuffer = emptyMap()
-                        canUndo = false
-                    }
-                }
-            }
+            lastUndoMessage = "Moved ${trashMap.size} item(s) to trash"
 
             statusMessage = if (failCount == 0 && successCount > 0) {
-                "Deleted $successCount item(s) — tap Undo"
+                "Moved to .trash — tap Undo"
             } else if (failCount > 0) {
-                "Deleted $successCount item(s), $failCount failed"
+                "Trashed $successCount, $failCount failed"
             } else {
                 "Delete failed"
             }
@@ -920,6 +943,40 @@ class FileExplorerViewModel(application: Application) : AndroidViewModel(applica
             }
             showRenameDialog = false
             renameTarget = null
+        }
+    }
+
+    fun showBatchRename(side: PaneSide) {
+        batchRenameTarget = side
+        showBatchRenameDialog = true
+    }
+
+    fun applyBatchRename(find: String, replace: String, useRegex: Boolean) {
+        val state = getPane(batchRenameTarget)
+        val files = state.selectedFiles.map { File(it) }
+        if (files.isEmpty()) {
+            statusMessage = "No files selected"
+            showBatchRenameDialog = false
+            return
+        }
+        viewModelScope.launch {
+            var count = 0
+            withContext(Dispatchers.IO) {
+                for (file in files) {
+                    val newName = if (useRegex) {
+                        file.name.replace(Regex(find), replace)
+                    } else {
+                        file.name.replace(find, replace)
+                    }
+                    if (newName.isNotBlank() && newName != file.name) {
+                        val newPath = java.io.File(file.parent, newName)
+                        if (FileUtils.rename(file.absolutePath, newPath.absolutePath).isSuccess) count++
+                    }
+                }
+            }
+            showBatchRenameDialog = false
+            statusMessage = "Renamed $count file(s)"
+            loadDirectory(batchRenameTarget, getPane(batchRenameTarget).currentPath)
         }
     }
 

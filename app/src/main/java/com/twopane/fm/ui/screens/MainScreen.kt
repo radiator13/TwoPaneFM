@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -75,6 +77,7 @@ import com.twopane.fm.ui.components.ShareDialog
 import com.twopane.fm.ui.components.SearchDialog
 import com.twopane.fm.ui.components.ApkBottomSheetMenu
 import com.twopane.fm.ui.components.ApkAction
+import com.twopane.fm.ui.components.BatchRenameDialog
 import com.twopane.fm.ui.theme.TwoPaneFMTheme
 import com.twopane.fm.util.ApkUtils
 import com.twopane.fm.util.FileUtils
@@ -262,6 +265,14 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                             IconButton(onClick = { viewModel.showSearch(activePane) }, modifier = Modifier.size(52.dp)) {
                                 Icon(Icons.Default.Search, "Search", modifier = Modifier.size(28.dp))
                             }
+                            IconButton(onClick = { viewModel.showHidden = !viewModel.showHidden }, modifier = Modifier.size(52.dp)) {
+                                Icon(
+                                    if (viewModel.showHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    "Hidden files",
+                                    modifier = Modifier.size(28.dp),
+                                    tint = if (viewModel.showHidden) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                             Spacer(Modifier.width(12.dp))
 
                             IconButton(onClick = { viewModel.showNewFolder(activePane) }, modifier = Modifier.size(52.dp)) {
@@ -308,6 +319,13 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                             onClearSelection = { viewModel.clearSelections(PaneSide.LEFT) },
                             onInvertSelection = { viewModel.invertSelection(PaneSide.LEFT) },
                             onShare = { viewModel.shareSelected(PaneSide.LEFT) },
+                            onCompare = if (viewModel.leftPane.selectedFiles.size == 2) {{
+                                val paths = viewModel.leftPane.selectedFiles.toList()
+                                viewModel.navigateToTextDiff(paths[0], paths[1])
+                            }} else null,
+                            onBatchRename = if (viewModel.leftPane.selectedFiles.size > 1) {{
+                                viewModel.showBatchRename(PaneSide.LEFT)
+                            }} else null,
                             onSortOrder = { viewModel.sortOrder = it },
                             onFilterChange = { viewModel.updateFilter(it) },
                             currentSortOrder = viewModel.sortOrder
@@ -347,6 +365,13 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                             onClearSelection = { viewModel.clearSelections(PaneSide.RIGHT) },
                             onInvertSelection = { viewModel.invertSelection(PaneSide.RIGHT) },
                             onShare = { viewModel.shareSelected(PaneSide.RIGHT) },
+                            onCompare = if (viewModel.rightPane.selectedFiles.size == 2) {{
+                                val paths = viewModel.rightPane.selectedFiles.toList()
+                                viewModel.navigateToTextDiff(paths[0], paths[1])
+                            }} else null,
+                            onBatchRename = if (viewModel.rightPane.selectedFiles.size > 1) {{
+                                viewModel.showBatchRename(PaneSide.RIGHT)
+                            }} else null,
                             onSortOrder = { viewModel.sortOrder = it },
                             onFilterChange = { viewModel.updateFilter(it) },
                             currentSortOrder = viewModel.sortOrder
@@ -439,15 +464,27 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                     onDismiss = { viewModel.showShareDialog = false; viewModel.shareTargets = emptyList() }
                 )
             }
+            if (viewModel.showBatchRenameDialog) {
+                val side = viewModel.batchRenameTarget
+                val selCount = if (side == PaneSide.LEFT) viewModel.leftPane.selectedFiles.size else viewModel.rightPane.selectedFiles.size
+                BatchRenameDialog(
+                    fileCount = selCount,
+                    onDismiss = { viewModel.showBatchRenameDialog = false },
+                    onPreview = { _, _, _ -> },
+                    onApply = { find, replace, useRegex -> viewModel.applyBatchRename(find, replace, useRegex) }
+                )
+            }
             if (showSettings) {
                 SettingsDialog(
                     showHidden = viewModel.showHidden,
                     sortOrder = viewModel.sortOrder,
+                    sortAscending = viewModel.sortAscending,
                     themeMode = viewModel.themeMode,
                     viewMode = viewModel.viewMode,
                     activeFilter = viewModel.activeFilter,
                     onToggleHidden = { viewModel.showHidden = it },
                     onSortOrder = { viewModel.sortOrder = it },
+                    onSortAscending = { viewModel.sortAscending = it },
                     onThemeMode = { viewModel.themeMode = it },
                     onViewMode = { viewModel.viewMode = it },
                     onFilterChange = { viewModel.updateFilter(it) },
@@ -471,6 +508,13 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
             FileExplorerViewModel.Screen.APK_TOOL_RESULT -> {
                 ApkToolResultScreen(
                     viewModel = viewModel,
+                    onBack = { viewModel.navigateBackFromApkEditor() }
+                )
+            }
+            FileExplorerViewModel.Screen.TEXT_DIFF -> {
+                TextDiffScreen(
+                    path1 = viewModel.diffPath1,
+                    path2 = viewModel.diffPath2,
                     onBack = { viewModel.navigateBackFromApkEditor() }
                 )
             }

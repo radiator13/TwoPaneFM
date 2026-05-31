@@ -8,12 +8,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,21 +55,103 @@ fun RenameDialog(currentName: String, onDismiss: () -> Unit, onConfirm: (String)
 }
 
 @Composable
+fun BatchRenameDialog(
+    fileCount: Int,
+    onDismiss: () -> Unit,
+    onPreview: (find: String, replace: String, useRegex: Boolean) -> Unit,
+    onApply: (find: String, replace: String, useRegex: Boolean) -> Unit
+) {
+    var findText by remember { mutableStateOf("") }
+    var replaceText by remember { mutableStateOf("") }
+    var useRegex by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Batch Rename ($fileCount files)") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = findText, onValueChange = { findText = it },
+                    label = { Text("Find") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = replaceText, onValueChange = { replaceText = it },
+                    label = { Text("Replace with") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Regex", modifier = Modifier.weight(1f))
+                    Switch(checked = useRegex, onCheckedChange = { useRegex = it })
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onApply(findText, replaceText, useRegex) },
+                enabled = findText.isNotBlank()
+            ) { Text("Apply") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
 fun DeleteConfirmDialog(count: Int, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Delete") }, text = { Text("Delete $count item(s)?") }, confirmButton = { TextButton(onClick = onConfirm) { Text("Delete", color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable
 fun PropertiesDialog(entry: FileEntry, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(entry.name) }, text = {
-        Column {
-            Text("Path: ${entry.path}"); Spacer(Modifier.height(4.dp))
-            Text("Type: ${if (entry.isDirectory) "Directory" else "File"}"); Spacer(Modifier.height(4.dp))
-            if (!entry.isDirectory) { Text("Size: ${FileUtils.formatSize(entry.size)}"); Spacer(Modifier.height(4.dp)) }
-            Text("Modified: ${FileUtils.formatDate(entry.lastModified)}"); Spacer(Modifier.height(4.dp))
-            Text("Permissions: ${entry.permissions}")
+    var checksums by remember { mutableStateOf<Pair<String, String>?>(null) }
+    LaunchedEffect(entry.path) {
+        if (!entry.isDirectory) {
+            kotlinx.coroutines.Dispatchers.IO.let { dispatch ->
+                kotlinx.coroutines.withContext(dispatch) {
+                    try {
+                        val file = java.io.File(entry.path)
+                        val md5 = java.security.MessageDigest.getInstance("MD5")
+                        val sha256 = java.security.MessageDigest.getInstance("SHA-256")
+                        file.inputStream().buffered(65536).use { input ->
+                            val buffer = ByteArray(65536)
+                            var read: Int
+                            while (input.read(buffer).also { read = it } != -1) {
+                                md5.update(buffer, 0, read)
+                                sha256.update(buffer, 0, read)
+                            }
+                        }
+                        checksums = md5.digest().joinToString("") { "%02x".format(it) } to
+                                sha256.digest().joinToString("") { "%02x".format(it) }
+                    } catch (_: Exception) {}
+                }
+            }
         }
-    }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(entry.name) },
+        text = {
+            Column {
+                Text("Path: ${entry.path}"); Spacer(Modifier.height(4.dp))
+                Text("Type: ${if (entry.isDirectory) "Directory" else "File"}"); Spacer(Modifier.height(4.dp))
+                if (!entry.isDirectory) { Text("Size: ${FileUtils.formatSize(entry.size)} (${String.format("%,d", entry.size)} bytes)"); Spacer(Modifier.height(4.dp)) }
+                Text("Modified: ${FileUtils.formatDate(entry.lastModified)}"); Spacer(Modifier.height(4.dp))
+                Text("Permissions: ${entry.permissions}")
+                if (!entry.isDirectory && checksums != null) {
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
+                    Text("MD5:", style = MaterialTheme.typography.labelMedium)
+                    Text(checksums!!.first, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                    Spacer(Modifier.height(4.dp))
+                    Text("SHA-256:", style = MaterialTheme.typography.labelMedium)
+                    Text(checksums!!.second, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+    )
 }
 
 @Composable
@@ -141,11 +225,13 @@ fun SearchDialog(query: String, onQueryChange: (String) -> Unit, onSearch: () ->
 fun SettingsDialog(
     showHidden: Boolean,
     sortOrder: SortOrder,
+    sortAscending: Boolean,
     themeMode: ThemeMode,
     viewMode: ViewMode,
     activeFilter: FilterType,
     onToggleHidden: (Boolean) -> Unit,
     onSortOrder: (SortOrder) -> Unit,
+    onSortAscending: (Boolean) -> Unit,
     onThemeMode: (ThemeMode) -> Unit,
     onViewMode: (ViewMode) -> Unit,
     onFilterChange: (FilterType) -> Unit,
@@ -174,9 +260,14 @@ fun SettingsDialog(
             Text("Sort by", style = MaterialTheme.typography.labelMedium)
             SortOrder.entries.forEach { order ->
                 TextButton(onClick = { onSortOrder(order) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(text = when (order) { SortOrder.NAME -> "Name"; SortOrder.TYPE -> "Type"; SortOrder.SIZE -> "Size"; SortOrder.DATE -> "Date modified" },
+                    Text(text = order.label,
                         color = if (order == sortOrder) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 }
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Ascending order", modifier = Modifier.weight(1f))
+                Switch(checked = sortAscending, onCheckedChange = onSortAscending)
             }
         }
     }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })

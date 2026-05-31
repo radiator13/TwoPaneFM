@@ -45,6 +45,8 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.VideoFile
+import androidx.compose.material.icons.filled.Compare
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -88,6 +90,8 @@ fun FilePane(
     onClearSelection: () -> Unit,
     onInvertSelection: () -> Unit,
     onShare: () -> Unit,
+    onCompare: (() -> Unit)? = null,
+    onBatchRename: (() -> Unit)? = null,
     onSortOrder: (SortOrder) -> Unit,
     onFilterChange: (FilterType) -> Unit,
     currentSortOrder: SortOrder,
@@ -229,6 +233,16 @@ fun FilePane(
                         }
                         IconButton(onClick = onShare, modifier = Modifier.size(36.dp)) {
                             Icon(Icons.Default.Share, "Share", modifier = Modifier.size(20.dp))
+                        }
+                        if (onCompare != null) {
+                            IconButton(onClick = onCompare, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Default.Compare, "Compare", modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        if (onBatchRename != null) {
+                            IconButton(onClick = onBatchRename, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Default.DriveFileRenameOutline, "Batch Rename", modifier = Modifier.size(20.dp))
+                            }
                         }
                         IconButton(onClick = onSelectAll, modifier = Modifier.size(36.dp)) {
                             Icon(Icons.Default.SelectAll, "All", modifier = Modifier.size(20.dp))
