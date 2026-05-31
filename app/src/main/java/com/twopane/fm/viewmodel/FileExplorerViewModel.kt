@@ -376,6 +376,24 @@ class FileExplorerViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    /** Unified back handler: sub-screens navigate in-app, file manager navigates directory history */
+    fun handleBack(activePane: PaneSide) {
+        if (currentScreen != Screen.FILE_MANAGER) {
+            navigateBackFromApkEditor()
+            return
+        }
+        // FILE_MANAGER: try active pane first, then the other
+        val activeState = getPane(activePane)
+        val otherPane = if (activePane == PaneSide.LEFT) PaneSide.RIGHT else PaneSide.LEFT
+        val otherState = getPane(otherPane)
+        if (activeState.history.isNotEmpty()) {
+            navigateBack(activePane)
+        } else if (otherState.history.isNotEmpty()) {
+            navigateBack(otherPane)
+        }
+        // else: at root, back consumed — prevents accidental app exit
+    }
+
     fun exitApkEditor() {
         currentScreen = Screen.FILE_MANAGER
         clearApkState()

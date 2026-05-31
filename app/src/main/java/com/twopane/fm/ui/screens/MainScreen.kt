@@ -96,6 +96,15 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
     }
 
     TwoPaneFMTheme(darkTheme = isDarkTheme) {
+        var activePane by remember { mutableStateOf(PaneSide.LEFT) }
+
+        // ── Unified back gesture ──
+        // Sub-screens: navigate back in-app
+        // File manager: navigate directory history (active pane first)
+        BackHandler {
+            viewModel.handleBack(activePane)
+        }
+
         when (viewModel.currentScreen) {
             FileExplorerViewModel.Screen.APK_BROWSER -> {
                 ApkBrowserScreen(
@@ -142,35 +151,11 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                 )
             }
             FileExplorerViewModel.Screen.FILE_MANAGER -> {
-        var activePane by remember { mutableStateOf(PaneSide.LEFT) }
         var showSettings by remember { mutableStateOf(false) }
         val snackbarHostState = remember { SnackbarHostState() }
         val drawerState = rememberDrawerState(DrawerValue.Closed)
         val scope = rememberCoroutineScope()
         val clipboardManager = LocalClipboardManager.current
-
-        // ── Back gesture handling ──
-        // Sub-screens: always navigate back in-app
-        // FILE_MANAGER: navigate directory history, then allow exit
-        BackHandler {
-            if (viewModel.currentScreen != FileExplorerViewModel.Screen.FILE_MANAGER) {
-                viewModel.navigateBackFromApkEditor()
-            } else {
-                val leftHasHistory = viewModel.leftPane.history.isNotEmpty()
-                val rightHasHistory = viewModel.rightPane.history.isNotEmpty()
-                if (leftHasHistory || rightHasHistory) {
-                    // Navigate back in whichever pane has history (prefer active)
-                    val activeHasHistory = if (activePane == PaneSide.LEFT) leftHasHistory else rightHasHistory
-                    if (activeHasHistory) {
-                        viewModel.navigateBack(activePane)
-                    } else {
-                        viewModel.navigateBack(if (activePane == PaneSide.LEFT) PaneSide.RIGHT else PaneSide.LEFT)
-                    }
-                }
-                // If neither has history, BackHandler consumed it — app stays.
-                // This prevents accidental exits. User can use home/recents to leave.
-            }
-        }
 
         LaunchedEffect(viewModel.statusMessage) {
             viewModel.statusMessage?.let { msg ->
