@@ -52,6 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -147,6 +148,29 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
         val drawerState = rememberDrawerState(DrawerValue.Closed)
         val scope = rememberCoroutineScope()
         val clipboardManager = LocalClipboardManager.current
+
+        // ── Back gesture handling ──
+        // Sub-screens: always navigate back in-app
+        // FILE_MANAGER: navigate directory history, then allow exit
+        BackHandler {
+            if (viewModel.currentScreen != FileExplorerViewModel.Screen.FILE_MANAGER) {
+                viewModel.navigateBackFromApkEditor()
+            } else {
+                val leftHasHistory = viewModel.leftPane.history.isNotEmpty()
+                val rightHasHistory = viewModel.rightPane.history.isNotEmpty()
+                if (leftHasHistory || rightHasHistory) {
+                    // Navigate back in whichever pane has history (prefer active)
+                    val activeHasHistory = if (activePane == PaneSide.LEFT) leftHasHistory else rightHasHistory
+                    if (activeHasHistory) {
+                        viewModel.navigateBack(activePane)
+                    } else {
+                        viewModel.navigateBack(if (activePane == PaneSide.LEFT) PaneSide.RIGHT else PaneSide.LEFT)
+                    }
+                }
+                // If neither has history, BackHandler consumed it — app stays.
+                // This prevents accidental exits. User can use home/recents to leave.
+            }
+        }
 
         LaunchedEffect(viewModel.statusMessage) {
             viewModel.statusMessage?.let { msg ->
