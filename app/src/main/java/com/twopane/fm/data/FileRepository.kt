@@ -25,9 +25,10 @@ class FileRepository {
         path: String,
         showHidden: Boolean = false,
         sortOrder: SortOrder = SortOrder.NAME,
+        sortAscending: Boolean = true,
         filter: FilterType = FilterType.ALL
     ): List<FileEntry> = withContext(Dispatchers.IO) {
-        FileUtils.listFiles(path, showHidden, sortOrder, filter)
+        FileUtils.listFiles(path, showHidden, sortOrder, sortAscending, filter)
     }
 
     suspend fun copyFile(source: String, destination: String): Result<Unit> = withContext(Dispatchers.IO) {
