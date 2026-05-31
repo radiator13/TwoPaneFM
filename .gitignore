@@ -1,0 +1,35 @@
+# Build
+build/
+*.apk
+*.aab
+*.ap_
+*.dex
+.cxx/
+
+# Gradle
+.gradle/
+
+# Kotlin
+.kotlin/
+
+# Local config
+local.properties
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dev notes
+PROGRESS_SAVE.md
+IMPROVEMENT_PLAN.md
+TwoPaneFM/
+
+# Signing
+*.jks
+*.keystore
