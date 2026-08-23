@@ -301,6 +301,7 @@ fun VirtualizedCodeEditor(
     wordWrap: Boolean = true,
     highlightLineNum: Int = -1,
     scrollToLine: Int = -1,
+    onVisibleLineChange: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var fontSize by remember { mutableFloatStateOf(BASE_FONT_SIZE) }
@@ -311,17 +312,26 @@ fun VirtualizedCodeEditor(
     var findQuery by remember { mutableStateOf("") }
     var replaceQuery by remember { mutableStateOf("") }
     var showReplace by remember { mutableStateOf(false) }
-    var matchCount by remember { mutableIntStateOf(0) }
-    var currentMatch by remember { mutableIntStateOf(0) }
     var caseSensitive by remember { mutableStateOf(false) }
 
-    // Update match count when query changes
-    LaunchedEffect(findQuery, lines, caseSensitive) {
-        matchCount = if (findQuery.isEmpty()) 0 else {
+    // Matched lines for find navigation
+    val matchedLines = remember(findQuery, lines, caseSensitive) {
+        if (findQuery.isEmpty()) emptyList()
+        else {
             val q = if (caseSensitive) findQuery else findQuery.lowercase()
-            lines.count { line -> (if (caseSensitive) line else line.lowercase()).contains(q) }
+            lines.indices.filter { idx ->
+                val line = lines[idx]
+                (if (caseSensitive) line else line.lowercase()).contains(q)
+            }
         }
-        currentMatch = if (matchCount > 0) 1 else 0
+    }
+    var matchPos by remember { mutableStateOf(0) }
+    LaunchedEffect(matchedLines) { matchPos = 0 }
+
+    // Active highlighted line: explicit jump wins, else current find match
+    val activeHighlight = remember(highlightLineNum, matchedLines, matchPos) {
+        if (highlightLineNum >= 0) highlightLineNum
+        else matchedLines.getOrNull(matchPos) ?: -1
     }
 
     val listState = rememberLazyListState()
@@ -329,8 +339,14 @@ fun VirtualizedCodeEditor(
     // Scroll to specific line when requested
     LaunchedEffect(scrollToLine) {
         if (scrollToLine in lines.indices) {
-            listState.scrollToItem(scrollToLine, 0)
+            listState.scrollToItem(scrollToLine.coerceAtMost(max(0, lines.size - 3)), 0)
         }
+    }
+
+    // Report first visible line (for Ln/Col status)
+    val firstVisible by remember { derivedStateOf { listState.firstVisibleItemIndex } }
+    LaunchedEffect(firstVisible) {
+        onVisibleLineChange?.invoke(firstVisible + 1)
     }
 
     // Compute line number column width
@@ -358,10 +374,30 @@ fun VirtualizedCodeEditor(
                             singleLine = true
                         )
                         if (findQuery.isNotEmpty()) {
-                            Text("${if (matchCount > 0) currentMatch else 0}/$matchCount",
+                            Text("${if (matchedLines.isEmpty()) 0 else matchPos + 1}/${matchedLines.size}",
                                 style = MaterialTheme.typography.labelSmall,
                                 modifier = Modifier.padding(horizontal = 4.dp))
                         }
+                        IconButton(
+                            onClick = {
+                                if (matchedLines.isNotEmpty()) {
+                                    matchPos = if (matchPos - 1 < 0) matchedLines.size - 1 else matchPos - 1
+                                    listState.scrollToItem(matchedLines[matchPos].coerceAtMost(max(0, lines.size - 3)), 0)
+                                }
+                            },
+                            enabled = matchedLines.isNotEmpty(),
+                            modifier = Modifier.size(32.dp)
+                        ) { Icon(Icons.Default.KeyboardArrowUp, "Previous match", modifier = Modifier.size(16.dp)) }
+                        IconButton(
+                            onClick = {
+                                if (matchedLines.isNotEmpty()) {
+                                    matchPos = (matchPos + 1) % matchedLines.size
+                                    listState.scrollToItem(matchedLines[matchPos].coerceAtMost(max(0, lines.size - 3)), 0)
+                                }
+                            },
+                            enabled = matchedLines.isNotEmpty(),
+                            modifier = Modifier.size(32.dp)
+                        ) { Icon(Icons.Default.KeyboardArrowDown, "Next match", modifier = Modifier.size(16.dp)) }
                         IconButton(onClick = { caseSensitive = !caseSensitive }, modifier = Modifier.size(32.dp)) {
                             Text("Aa", style = MaterialTheme.typography.labelSmall,
                                 color = if (caseSensitive) MaterialTheme.colorScheme.primary
@@ -385,6 +421,16 @@ fun VirtualizedCodeEditor(
                                 singleLine = true
                             )
                             TextButton(onClick = {
+                                // Replace one occurrence on the current match line
+                                val idx = matchedLines.getOrNull(matchPos) ?: return@TextButton
+                                val line = lines.getOrNull(idx) ?: return@TextButton
+                                val replaced = if (caseSensitive) line.replaceFirst(findQuery, replaceQuery)
+                                else line.replaceFirst(findQuery, replaceQuery, ignoreCase = true)
+                                onLineChange?.invoke(idx, replaced)
+                            }, enabled = matchedLines.isNotEmpty(), modifier = Modifier.height(40.dp)) {
+                                Text("One", style = MaterialTheme.typography.labelSmall)
+                            }
+                            TextButton(onClick = {
                                 if (findQuery.isNotEmpty()) {
                                     val newLines = lines.map {
                                         if (caseSensitive) it.replace(findQuery, replaceQuery)
@@ -392,7 +438,7 @@ fun VirtualizedCodeEditor(
                                     }
                                     onContentChange(newLines.joinToString("\n"))
                                 }
-                            }, modifier = Modifier.height(40.dp)) {
+                            }, enabled = matchedLines.isNotEmpty(), modifier = Modifier.height(40.dp)) {
                                 Text("All", style = MaterialTheme.typography.labelSmall)
                             }
                         }
@@ -423,7 +469,7 @@ fun VirtualizedCodeEditor(
                             fontFamily = FontFamily.Monospace,
                             fontSize = fontSize.sp,
                             lineHeight = lineHeightSp,
-                            color = if (idx == highlightLineNum) MaterialTheme.colorScheme.primary
+                            color = if (idx == activeHighlight) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
                             modifier = Modifier.padding(end = 4.dp)
                         )
@@ -439,7 +485,7 @@ fun VirtualizedCodeEditor(
                     ) {
                         items(lines.size) { idx ->
                             val line = lines[idx]
-                            val bg = if (idx == highlightLineNum)
+                            val bg = if (idx == activeHighlight)
                                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                             else Color.Transparent
 

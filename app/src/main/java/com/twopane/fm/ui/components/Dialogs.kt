@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -191,14 +193,14 @@ fun ContextMenuDialog(
     onProperties: () -> Unit,
     onCopyPath: () -> Unit,
     onShare: () -> Unit,
-    onApkViewer: (() -> Unit)? = null,
+    onExtract: (() -> Unit)? = null,
     onOpenWith: (() -> Unit)? = null
 ) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text(entry.name) }, text = {
         Column {
-            if (onApkViewer != null) {
-                TextButton(onClick = { onApkViewer(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("APK Viewer", color = MaterialTheme.colorScheme.primary)
+            if (onExtract != null) {
+                TextButton(onClick = { onExtract(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Extract here", color = MaterialTheme.colorScheme.primary)
                 }
             }
             if (onOpenWith != null) {
@@ -229,17 +231,25 @@ fun SettingsDialog(
     themeMode: ThemeMode,
     viewMode: ViewMode,
     activeFilter: FilterType,
+    linkedPanes: Boolean,
+    showThumbnails: Boolean,
     onToggleHidden: (Boolean) -> Unit,
     onSortOrder: (SortOrder) -> Unit,
     onSortAscending: (Boolean) -> Unit,
     onThemeMode: (ThemeMode) -> Unit,
     onViewMode: (ViewMode) -> Unit,
+    onLinkedPanes: (Boolean) -> Unit,
+    onShowThumbnails: (Boolean) -> Unit,
     onFilterChange: (FilterType) -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Settings") }, text = {
-        Column {
+        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Show hidden files", modifier = Modifier.weight(1f)); Switch(checked = showHidden, onCheckedChange = onToggleHidden) }
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Link panes (sync navigation)", modifier = Modifier.weight(1f)); Switch(checked = linkedPanes, onCheckedChange = onLinkedPanes) }
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Show thumbnails", modifier = Modifier.weight(1f)); Switch(checked = showThumbnails, onCheckedChange = onShowThumbnails) }
             Spacer(Modifier.height(8.dp))
             Text("Theme", style = MaterialTheme.typography.labelMedium)
             ThemeMode.entries.forEach { mode ->

@@ -1,9 +1,33 @@
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::{jboolean, jbyteArray, jint, jintArray, jlong, jlongArray, jstring};
+use std::collections::HashMap;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicI32, Ordering};
+
+fn dir_slots() -> &'static Mutex<HashMap<i32, DirResult>> {
+    static DIR_SLOTS: OnceLock<Mutex<HashMap<i32, DirResult>>> = OnceLock::new();
+    DIR_SLOTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+static NEXT_DIR_ID: AtomicI32 = AtomicI32::new(0);
+
+
+fn text_buffers() -> &'static Mutex<HashMap<i32, TextBuffer>> {
+    static TEXT_SLOTS: OnceLock<Mutex<HashMap<i32, TextBuffer>>> = OnceLock::new();
+    TEXT_SLOTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+static NEXT_TEXT_ID: AtomicI32 = AtomicI32::new(0);
+
+fn search_results() -> &'static Mutex<Vec<String>> {
+    static SEARCH: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+    SEARCH.get_or_init(|| Mutex::new(Vec::new()))
+}
 
 // ═══════════════════════════════════════════════════════════════
 // 1. DIRECTORY SCAN — readdir + stat in one native call
@@ -18,37 +42,40 @@ struct DirResult {
     names_buf: Vec<u8>,
 }
 
-static mut SLOTS: [Option<DirResult>; 4] = [None, None, None, None];
+// Thread-safe registries: JNI calls may arrive from different threads
+// (Kotlin Dispatchers.IO pool), so static mut is unsound here.
+
+
 
 fn alloc_slot() -> Option<usize> {
-    for i in 0..4 {
-        // SAFETY: JNI calls are single-threaded per thread; Android JNI
-        // typically calls from the same thread for a given View.
-        let slot = unsafe { &mut SLOTS[i] };
-        if slot.is_none() {
-            *slot = Some(DirResult {
-                sizes: Vec::with_capacity(256),
-                mtimes: Vec::with_capacity(256),
-                flags: Vec::with_capacity(256),
-                name_offsets: Vec::with_capacity(256),
-                name_lens: Vec::with_capacity(256),
-                names_buf: Vec::with_capacity(65536),
-            });
-            return Some(i);
-        }
-    }
-    None
+    let mut map = dir_slots().lock().ok()?;
+    let id = NEXT_DIR_ID.fetch_add(1, Ordering::Relaxed);
+    map.insert(id, DirResult {
+        sizes: Vec::with_capacity(256),
+        mtimes: Vec::with_capacity(256),
+        flags: Vec::with_capacity(256),
+        name_offsets: Vec::with_capacity(256),
+        name_lens: Vec::with_capacity(256),
+        names_buf: Vec::with_capacity(65536),
+    });
+    Some(id as usize)
 }
 
-fn free_slot(s: usize) {
-    if s < 4 {
-        unsafe { SLOTS[s] = None; }
+fn free_slot(slot: usize) {
+    if let Ok(mut map) = dir_slots().lock() {
+        map.remove(&(slot as i32));
     }
 }
 
-fn get_slot(s: usize) -> Option<&'static DirResult> {
-    if s < 4 {
-        unsafe { SLOTS[s].as_ref() }
+fn get_slot(slot: usize) -> Option<&'static DirResult> {
+    // SAFETY: the slot stays alive because callers hold no reference across
+    // free_slot; we leak lifetime to 'static to keep getter signatures simple,
+    // mirroring previous behavior of the fixed-slot registry.
+    if let Ok(map) = dir_slots().lock() {
+        map.get(&(slot as i32)).map(|r| unsafe {
+            #[allow(clippy::missing_transmute_annotations)]
+            std::mem::transmute::<&DirResult, &'static DirResult>(r)
+        })
     } else {
         None
     }
@@ -81,7 +108,14 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeScanDir(
         None => return -1,
     };
 
-    let dr = unsafe { SLOTS[slot_idx].as_mut().unwrap() };
+    let dr = dir_slots().lock().ok().and_then(|mut map| {
+        map.get_mut(&(slot_idx as i32))
+            .map(|r| unsafe { std::mem::transmute::<&mut DirResult, &'static mut DirResult>(r) })
+    });
+    let mut dr = match dr {
+        Some(d) => d,
+        None => return -1,
+    };
     let show = show_hidden != 0;
 
     for entry in dir {
@@ -547,10 +581,9 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeIsDir(
 // ═══════════════════════════════════════════════════════════════
 
 const SEARCH_MAX: usize = 200;
-static mut SEARCH_RESULTS: Vec<String> = Vec::new();
+static SEARCH_RESULTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-fn search_recursive(dir_path: &Path, query: &str, qlen: usize) {
-    let results = unsafe { &mut SEARCH_RESULTS };
+fn search_recursive(dir_path: &Path, query: &str, qlen: usize, results: &mut Vec<String>) {
     if results.len() >= SEARCH_MAX {
         return;
     }
@@ -563,7 +596,7 @@ fn search_recursive(dir_path: &Path, query: &str, qlen: usize) {
     let query_lower = query.to_lowercase();
 
     for entry in dir {
-        if unsafe { SEARCH_RESULTS.len() } >= SEARCH_MAX {
+        if results.len() >= SEARCH_MAX {
             return;
         }
         let entry = match entry {
@@ -583,14 +616,14 @@ fn search_recursive(dir_path: &Path, query: &str, qlen: usize) {
         // Case-insensitive substring match
         if name_str.len() >= qlen && name_str.to_lowercase().contains(&query_lower) {
             let full_path = dir_path.join(&name);
-            unsafe { SEARCH_RESULTS.push(full_path.to_string_lossy().into_owned()); }
+            results.push(full_path.to_string_lossy().into_owned());
         }
 
         // Recurse into directories
         let child_meta = fs::symlink_metadata(entry.path());
         if let Ok(meta) = child_meta {
             if meta.is_dir() {
-                search_recursive(&entry.path(), query, qlen);
+                search_recursive(&entry.path(), query, qlen, results);
             }
         }
     }
@@ -609,16 +642,23 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeSearch(
         Err(_) => return 0,
     };
 
-    unsafe { SEARCH_RESULTS.clear(); }
-    search_recursive(Path::new(&path), &query, query.len());
-    unsafe { SEARCH_RESULTS.len() as jint }
+    let mut results = match SEARCH_RESULTS.lock() {
+        Ok(r) => r,
+        Err(_) => return 0,
+    };
+    results.clear();
+    search_recursive(Path::new(&path), &query, query.len(), &mut results);
+    results.len() as jint
 }
 
 #[no_mangle]
 pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeGetSearchResult(
     mut env: JNIEnv, _cls: JClass, idx: jint,
 ) -> jstring {
-    let results = unsafe { &SEARCH_RESULTS };
+    let results = match SEARCH_RESULTS.lock() {
+        Ok(r) => r,
+        Err(_) => return std::ptr::null_mut(),
+    };
     if idx < 0 || idx as usize >= results.len() {
         return std::ptr::null_mut();
     }
@@ -811,30 +851,35 @@ struct TextBuffer {
 }
 
 const MAX_TEXT_BUFFERS: usize = 8;
-static mut TEXT_BUFFERS: [Option<TextBuffer>; MAX_TEXT_BUFFERS] = [
-    None, None, None, None, None, None, None, None,
-];
 
-fn alloc_text_slot() -> Option<usize> {
-    for i in 0..MAX_TEXT_BUFFERS {
-        if unsafe { TEXT_BUFFERS[i].is_none() } {
-            return Some(i);
-        }
+
+
+fn alloc_text_slot() -> Option<i32> {
+    let mut map = text_buffers().lock().ok()?;
+    if map.len() >= MAX_TEXT_BUFFERS {
+        return None;
     }
-    None
+    let id = NEXT_TEXT_ID.fetch_add(1, Ordering::Relaxed);
+    Some(id)
 }
 
 fn get_text_buf(idx: usize) -> Option<&'static TextBuffer> {
-    if idx < MAX_TEXT_BUFFERS {
-        unsafe { TEXT_BUFFERS[idx].as_ref() }
+    // SAFETY: handles are unique and only freed via nativeTextClose after the
+    // editor is done; mirrors the previous fixed-slot lifetime model.
+    if let Ok(map) = text_buffers().lock() {
+        map.get(&(idx as i32)).map(|b| unsafe {
+            std::mem::transmute::<&TextBuffer, &'static TextBuffer>(b)
+        })
     } else {
         None
     }
 }
 
 fn get_text_buf_mut(idx: usize) -> Option<&'static mut TextBuffer> {
-    if idx < MAX_TEXT_BUFFERS {
-        unsafe { TEXT_BUFFERS[idx].as_mut() }
+    if let Ok(mut map) = text_buffers().lock() {
+        map.get_mut(&(idx as i32)).map(|b| unsafe {
+            std::mem::transmute::<&mut TextBuffer, &'static mut TextBuffer>(b)
+        })
     } else {
         None
     }
@@ -872,14 +917,16 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextOpen(
         Some(s) => s,
         None => return -1,
     };
-    unsafe {
-        TEXT_BUFFERS[slot] = Some(TextBuffer {
+    if let Ok(mut map) = text_buffers().lock() {
+        map.insert(slot, TextBuffer {
             data,
             line_offsets,
             path,
         });
+    } else {
+        return -1;
     }
-    slot as jint
+    slot
 }
 
 /// Return total line count.
@@ -1098,9 +1145,8 @@ pub extern "C" fn Java_com_twopane_fm_util_NativeFileOps_nativeTextClose(
     _cls: JClass,
     handle: jint,
 ) {
-    let idx = handle as usize;
-    if idx < MAX_TEXT_BUFFERS {
-        unsafe { TEXT_BUFFERS[idx] = None; }
+    if let Ok(mut map) = text_buffers().lock() {
+        map.remove(&(handle as i32));
     }
 }
 

@@ -55,7 +55,7 @@ android {
 
     packaging {
         jniLibs {
-            useLegacyPackaging = true
+            useLegacyPackaging = false
         }
         resources {
             excludes += listOf(
@@ -85,18 +85,4 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.animation:animation")
-
-    implementation("org.smali:smali:2.5.2") {
-        exclude(group = "com.google.guava", module = "guava")
-    }
-    implementation("org.smali:baksmali:2.5.2") {
-        exclude(group = "com.google.guava", module = "guava")
-    }
-    implementation("com.beust:jcommander:1.82")
-    implementation("io.github.skylot:jadx-core:1.5.2") {
-        exclude(group = "com.google.guava", module = "guava")
-    }
-    implementation("com.android.tools.build:apksig:8.7.0")
-    implementation("org.bouncycastle:bcprov-jdk18on:1.79")
-    implementation("org.bouncycastle:bcpkix-jdk18on:1.79")
 }

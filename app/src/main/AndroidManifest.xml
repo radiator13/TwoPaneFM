@@ -5,7 +5,6 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <!-- Declare intent queries so Android 11+ can resolve VIEW intents -->
     <queries>
@@ -36,19 +35,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- APK files (content://) -->
+            <!-- APK files (content://) — browsed as zip archives -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content"
-                      android:mimeType="application/vnd.android.package-archive" />
-            </intent-filter>
-
-            <!-- APK files (file://) -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:scheme="file"
                       android:mimeType="application/vnd.android.package-archive" />
             </intent-filter>
 

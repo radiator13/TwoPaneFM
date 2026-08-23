@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DrawerValue
@@ -34,12 +36,14 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -76,11 +80,8 @@ import com.twopane.fm.ui.components.RootPickerDialog
 import com.twopane.fm.ui.components.SettingsDialog
 import com.twopane.fm.ui.components.ShareDialog
 import com.twopane.fm.ui.components.SearchDialog
-import com.twopane.fm.ui.components.ApkBottomSheetMenu
-import com.twopane.fm.ui.components.ApkAction
 import com.twopane.fm.ui.components.BatchRenameDialog
 import com.twopane.fm.ui.theme.TwoPaneFMTheme
-import com.twopane.fm.util.ApkUtils
 import com.twopane.fm.util.FileUtils
 import com.twopane.fm.viewmodel.FileExplorerViewModel
 import com.twopane.fm.viewmodel.FileExplorerViewModel.PaneSide
@@ -99,37 +100,25 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
         var activePane by remember { mutableStateOf(PaneSide.LEFT) }
 
         // ── Unified back gesture ──
-        // Sub-screens: navigate back in-app
-        // File manager: navigate directory history (active pane first)
         BackHandler {
             viewModel.handleBack(activePane)
         }
 
         when (viewModel.currentScreen) {
-            FileExplorerViewModel.Screen.APK_BROWSER -> {
-                ApkBrowserScreen(
-                    apkPath = viewModel.apkEditorPath,
-                    viewModel = viewModel,
-                    onBack = { viewModel.exitApkEditor() }
+            FileExplorerViewModel.Screen.ARCHIVE_BROWSER -> {
+                ArchiveBrowserScreen(
+                    archivePath = viewModel.archivePath,
+                    onOpenText = { path ->
+                        viewModel.navigateToTextEditor(path, readOnly = true,
+                            returnTo = FileExplorerViewModel.Screen.ARCHIVE_BROWSER)
+                    },
+                    onBack = { viewModel.navigateBackFromScreen() }
                 )
             }
-            FileExplorerViewModel.Screen.SMALI_BROWSER -> {
-                SmaliBrowserScreen(
-                    smaliDir = viewModel.apkDisassembledDir,
-                    dexName = viewModel.currentDexName,
-                    viewModel = viewModel,
-                    onBack = { viewModel.navigateBackFromApkEditor() },
-                    onOpenFile = { path ->
-                        viewModel.navigateToSmaliEditor(path, viewModel.apkDisassembledDir)
-                    }
-                )
-            }
-            FileExplorerViewModel.Screen.SMALI_EDITOR -> {
-                SmaliEditorScreen(
-                    smaliFilePath = viewModel.currentSmaliFile,
-                    workingDir = viewModel.editorWorkingDir,
-                    viewModel = viewModel,
-                    onBack = { viewModel.navigateBackFromApkEditor() }
+            FileExplorerViewModel.Screen.STORAGE_ANALYZER -> {
+                StorageAnalyzerScreen(
+                    rootPath = viewModel.analyzerPath,
+                    onBack = { viewModel.navigateBackFromScreen() }
                 )
             }
             FileExplorerViewModel.Screen.TEXT_EDITOR -> {
@@ -137,17 +126,14 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                     filePath = viewModel.textEditorPath,
                     viewModel = viewModel,
                     readOnly = viewModel.textEditorReadOnly,
-                    onBack = { viewModel.navigateBackFromApkEditor() }
+                    onBack = { viewModel.navigateBackFromScreen() }
                 )
             }
-            FileExplorerViewModel.Screen.JAVA_BROWSER -> {
-                JavaBrowserScreen(
-                    javaDir = viewModel.javaBrowserDir,
-                    viewModel = viewModel,
-                    onBack = { viewModel.navigateBackFromApkEditor() },
-                    onOpenFile = { path ->
-                        viewModel.navigateToTextEditor(path, readOnly = false)
-                    }
+            FileExplorerViewModel.Screen.TEXT_DIFF -> {
+                TextDiffScreen(
+                    path1 = viewModel.diffPath1,
+                    path2 = viewModel.diffPath2,
+                    onBack = { viewModel.navigateBackFromScreen() }
                 )
             }
             FileExplorerViewModel.Screen.FILE_MANAGER -> {
@@ -165,7 +151,7 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                     duration = androidx.compose.material3.SnackbarDuration.Short
                 )
                 if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
-                    viewModel.undoDelete()
+                    viewModel.undoLast()
                 }
                 viewModel.clearStatus()
             }
@@ -230,6 +216,14 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                                     "Bookmark",
                                     tint = MaterialTheme.colorScheme.onPrimary
                                 )
+                            }
+                            IconButton(onClick = { viewModel.navigateToStorageAnalyzer(activePane) }) {
+                                Icon(Icons.Default.DataUsage, "Storage Analyzer",
+                                    tint = MaterialTheme.colorScheme.onPrimary)
+                            }
+                            IconButton(onClick = { viewModel.openTerminalHere(activePane) }) {
+                                Icon(Icons.Default.Terminal, "Terminal",
+                                    tint = MaterialTheme.colorScheme.onPrimary)
                             }
                             if (viewModel.clipboard != null) {
                                 Text(
@@ -305,6 +299,7 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                             isActive = activePane == PaneSide.LEFT,
                             viewMode = viewModel.viewMode,
                             activeFilter = viewModel.activeFilter,
+                            showThumbnails = viewModel.showThumbnails,
                             modifier = Modifier.weight(1f),
                             onActivate = { activePane = PaneSide.LEFT },
                             onItemClick = { entry ->
@@ -328,6 +323,7 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                             onClearSelection = { viewModel.clearSelections(PaneSide.LEFT) },
                             onInvertSelection = { viewModel.invertSelection(PaneSide.LEFT) },
                             onShare = { viewModel.shareSelected(PaneSide.LEFT) },
+                            onZip = { viewModel.compressSelected(PaneSide.LEFT) },
                             onCompare = if (viewModel.leftPane.selectedFiles.size == 2) {{
                                 val paths = viewModel.leftPane.selectedFiles.toList()
                                 viewModel.navigateToTextDiff(paths[0], paths[1])
@@ -351,6 +347,7 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                             isActive = activePane == PaneSide.RIGHT,
                             viewMode = viewModel.viewMode,
                             activeFilter = viewModel.activeFilter,
+                            showThumbnails = viewModel.showThumbnails,
                             modifier = Modifier.weight(1f),
                             onActivate = { activePane = PaneSide.RIGHT },
                             onItemClick = { entry ->
@@ -374,6 +371,7 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                             onClearSelection = { viewModel.clearSelections(PaneSide.RIGHT) },
                             onInvertSelection = { viewModel.invertSelection(PaneSide.RIGHT) },
                             onShare = { viewModel.shareSelected(PaneSide.RIGHT) },
+                            onZip = { viewModel.compressSelected(PaneSide.RIGHT) },
                             onCompare = if (viewModel.rightPane.selectedFiles.size == 2) {{
                                 val paths = viewModel.rightPane.selectedFiles.toList()
                                 viewModel.navigateToTextDiff(paths[0], paths[1])
@@ -385,6 +383,29 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                             onFilterChange = { viewModel.updateFilter(it) },
                             currentSortOrder = viewModel.sortOrder
                         )
+                    }
+
+                    // ── Busy operation progress bar ──
+                    viewModel.busyOp?.let { op ->
+                        Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(op.label, style = MaterialTheme.typography.labelMedium,
+                                        modifier = Modifier.weight(1f), maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis)
+                                    if (op.totalBytes > 0) {
+                                        Text("${FileUtils.formatSize(op.doneBytes)} / ${FileUtils.formatSize(op.totalBytes)}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                                    }
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                LinearProgressIndicator(
+                                    progress = { op.fraction.coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth().height(4.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -438,25 +459,14 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                         viewModel.statusMessage = "Path copied"
                     },
                     onShare = { viewModel.shareSelected(activePane) },
-                    onApkViewer = if (entry.name.endsWith(".apk", true)) {
-                        { viewModel.showApkMenuFor(entry) }
+                    onExtract = if (!entry.isDirectory && com.twopane.fm.util.ArchiveSupport.isArchive(entry.name)) {
+                        { viewModel.extractArchiveHere(entry.path) }
                     } else null,
                     onOpenWith = {
                         viewModel.showContextMenu = false
                         viewModel.contextMenuTarget = null
                         viewModel.openFile(activePane, entry)
                     }
-                )
-            }
-            if (viewModel.showApkMenu) {
-                val apkInfo = remember(viewModel.apkMenuPath) {
-                    ApkUtils.getApkInfo(viewModel.apkMenuPath)
-                }
-                ApkBottomSheetMenu(
-                    apkName = viewModel.apkMenuPath.substringAfterLast("/"),
-                    apkInfo = apkInfo,
-                    onAction = { action -> viewModel.handleApkAction(action, viewModel.apkMenuPath) },
-                    onDismiss = { viewModel.showApkMenu = false }
                 )
             }
             if (viewModel.showSearchDialog) {
@@ -491,42 +501,20 @@ fun MainScreen(viewModel: FileExplorerViewModel = viewModel()) {
                     themeMode = viewModel.themeMode,
                     viewMode = viewModel.viewMode,
                     activeFilter = viewModel.activeFilter,
+                    linkedPanes = viewModel.linkedPanes,
+                    showThumbnails = viewModel.showThumbnails,
                     onToggleHidden = { viewModel.showHidden = it },
                     onSortOrder = { viewModel.sortOrder = it },
                     onSortAscending = { viewModel.sortAscending = it },
                     onThemeMode = { viewModel.themeMode = it },
                     onViewMode = { viewModel.viewMode = it },
+                    onLinkedPanes = { viewModel.linkedPanes = it },
+                    onShowThumbnails = { viewModel.showThumbnails = it },
                     onFilterChange = { viewModel.updateFilter(it) },
                     onDismiss = { showSettings = false })
             }
             }
         }
-            FileExplorerViewModel.Screen.APK_INFO -> {
-                ApkInfoScreen(
-                    apkPath = viewModel.apkEditorPath,
-                    onBack = { viewModel.navigateBackFromApkEditor() },
-                    onPermissionsClick = { viewModel.navigateToPermissionList(viewModel.apkEditorPath) }
-                )
-            }
-            FileExplorerViewModel.Screen.PERMISSION_LIST -> {
-                PermissionListScreen(
-                    apkPath = viewModel.apkEditorPath,
-                    onBack = { viewModel.navigateToApkInfo(viewModel.apkEditorPath) }
-                )
-            }
-            FileExplorerViewModel.Screen.APK_TOOL_RESULT -> {
-                ApkToolResultScreen(
-                    viewModel = viewModel,
-                    onBack = { viewModel.navigateBackFromApkEditor() }
-                )
-            }
-            FileExplorerViewModel.Screen.TEXT_DIFF -> {
-                TextDiffScreen(
-                    path1 = viewModel.diffPath1,
-                    path2 = viewModel.diffPath2,
-                    onBack = { viewModel.navigateBackFromApkEditor() }
-                )
-            }
-        } // when
+        } // when FILE_MANAGER
     } // TwoPaneFMTheme
 }

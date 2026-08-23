@@ -57,9 +57,13 @@ class AppPreferences(context: Context) {
         prefs.edit().putStringSet("bookmarks", b).apply()
     }
 
-    var smaliApiLevel: Int
-        get() = prefs.getInt("smali_api_level", 35)
-        set(v) = prefs.edit().putInt("smali_api_level", v).apply()
+    var linkedPanes: Boolean
+        get() = prefs.getBoolean("linked_panes", false)
+        set(v) = prefs.edit().putBoolean("linked_panes", v).apply()
+
+    var showThumbnails: Boolean
+        get() = prefs.getBoolean("show_thumbnails", true)
+        set(v) = prefs.edit().putBoolean("show_thumbnails", v).apply()
 
     var searchResultLimit: Int
         get() = prefs.getInt("search_result_limit", 200)

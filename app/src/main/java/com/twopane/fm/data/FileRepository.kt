@@ -3,12 +3,9 @@ package com.twopane.fm.data
 import com.twopane.fm.model.FileEntry
 import com.twopane.fm.model.FilterType
 import com.twopane.fm.model.SortOrder
-import com.twopane.fm.util.ApkInfo
-import com.twopane.fm.util.ApkUtils
-import com.twopane.fm.util.EmbeddedTools
+import com.twopane.fm.util.ArchiveSupport
 import com.twopane.fm.util.FileUtils
 import com.twopane.fm.util.NativeFileOps
-import com.twopane.fm.util.ToolLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -70,70 +67,22 @@ class FileRepository {
     fun getParentPath(path: String): String = FileUtils.getParentPath(path)
     fun resolvePath(base: String, name: String): String = FileUtils.resolvePath(base, name)
 
-    // ── APK Operations ──
+    // ── Archive Operations ──
 
-    suspend fun getApkInfo(apkPath: String): ApkInfo? = withContext(Dispatchers.IO) {
-        ApkUtils.getApkInfo(apkPath)
-    }
+    suspend fun listArchiveEntries(archivePath: String): List<ArchiveSupport.ArchiveEntry> =
+        withContext(Dispatchers.IO) { ArchiveSupport.listEntries(archivePath) }
 
-    suspend fun getManifestText(apkPath: String): String? = withContext(Dispatchers.IO) {
-        ApkUtils.getManifestText(apkPath)
-    }
+    suspend fun readArchiveTextEntry(archivePath: String, entryName: String): Result<String> =
+        withContext(Dispatchers.IO) { ArchiveSupport.readTextEntry(archivePath, entryName) }
 
-    suspend fun decodeBinaryXml(apkPath: String, entryName: String): String? = withContext(Dispatchers.IO) {
-        ApkUtils.decodeBinaryXml(apkPath, entryName)
-    }
+    suspend fun extractArchiveEntry(archivePath: String, entryName: String, outputDir: String): Result<String> =
+        withContext(Dispatchers.IO) { ArchiveSupport.extractEntry(archivePath, entryName, outputDir) }
 
-    suspend fun listApkContents(apkPath: String): List<String> = withContext(Dispatchers.IO) {
-        ApkUtils.listApkContents(apkPath)
-    }
+    suspend fun extractArchiveAll(archivePath: String, outputDir: String): Result<String> =
+        withContext(Dispatchers.IO) { ArchiveSupport.extractAll(archivePath, outputDir) }
 
-    // ── Embedded Tools ──
-
-    suspend fun disassembleDex(dexPath: String, outputDir: String, apiLevel: Int = 35): Result<String> = withContext(Dispatchers.IO) {
-        EmbeddedTools.disassembleDex(dexPath, outputDir, apiLevel)
-    }
-
-    suspend fun assembleSmali(smaliDir: String, outputDexPath: String, apiLevel: Int = 35): Result<String> = withContext(Dispatchers.IO) {
-        EmbeddedTools.assembleSmali(smaliDir, outputDexPath, apiLevel)
-    }
-
-    suspend fun decompileFullApk(
-        apkPath: String,
-        outputDir: String,
-        onProgress: ((String) -> Unit)? = null
-    ): Result<String> = withContext(Dispatchers.IO) {
-        EmbeddedTools.decompileFullApk(apkPath, outputDir, onProgress)
-    }
-
-    suspend fun signApk(apkPath: String, outputPath: String): Result<String> = withContext(Dispatchers.IO) {
-        EmbeddedTools.signApk(apkPath, outputPath)
-    }
-
-    suspend fun rebuildAndSign(
-        apkPath: String,
-        outputPath: String,
-        nativeZipalign: ToolLoader.ToolInfo?,
-        onProgress: ((String) -> Unit)? = null
-    ): Result<String> = withContext(Dispatchers.IO) {
-        EmbeddedTools.rebuildAndSign(apkPath, outputPath, nativeZipalign, onProgress)
-    }
-
-    suspend fun decodeResources(
-        apkPath: String,
-        outputPath: String,
-        nativeAapt2: ToolLoader.ToolInfo?
-    ): Result<String> = withContext(Dispatchers.IO) {
-        EmbeddedTools.decodeResources(apkPath, outputPath, nativeAapt2)
-    }
-
-    suspend fun jadxGetJavaCode(inputPath: String, className: String): Result<String> = withContext(Dispatchers.IO) {
-        EmbeddedTools.jadxGetJavaCode(inputPath, className)
-    }
-
-    fun listSmaliFiles(smaliDir: String) = EmbeddedTools.listSmaliFiles(smaliDir)
-    fun readSmaliFile(path: String) = EmbeddedTools.readSmaliFile(path)
-    fun writeSmaliFile(path: String, content: String) = EmbeddedTools.writeSmaliFile(path, content)
+    suspend fun createArchive(sourcePaths: List<String>, archivePath: String): Result<String> =
+        withContext(Dispatchers.IO) { ArchiveSupport.createZip(sourcePaths, archivePath) }
 
     // ── File I/O ──
 
@@ -143,20 +92,5 @@ class FileRepository {
 
     suspend fun writeFile(path: String, content: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching { File(path).writeText(content) }
-    }
-
-    suspend fun extractFromApk(apkPath: String, entryName: String, outputDir: File): String? = withContext(Dispatchers.IO) {
-        try {
-            val outFile = File(outputDir, entryName.replace("/", "_"))
-            if (outFile.exists()) return@withContext outFile.absolutePath
-            outFile.parentFile?.mkdirs()
-            java.util.zip.ZipFile(File(apkPath)).use { zip ->
-                val zipEntry = zip.getEntry(entryName) ?: return@withContext null
-                zip.getInputStream(zipEntry).use { input ->
-                    outFile.outputStream().use { output -> input.copyTo(output) }
-                }
-            }
-            outFile.absolutePath
-        } catch (e: Exception) { null }
     }
 }

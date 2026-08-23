@@ -69,6 +69,87 @@ object FileUtils {
             throw Exception("copy failed: $source → $destination")
     }
 
+    /** Total byte size of a file or directory tree. */
+    fun treeSize(path: String): Long = try {
+        val f = File(path)
+        if (f.isFile) f.length()
+        else f.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    } catch (_: Exception) { 0L }
+
+    /** Copy with byte-level progress reporting (pure Kotlin for progress visibility). */
+    fun copyWithProgress(
+        source: String,
+        destination: String,
+        onProgress: (bytesDone: Long) -> Unit
+    ): Result<Unit> = runCatching {
+        val src = File(source)
+        val dst = File(destination)
+        var done = 0L
+
+        fun doCopyFile(from: File, to: File) {
+            to.parentFile?.mkdirs()
+            from.inputStream().buffered(65536).use { input ->
+                to.outputStream().buffered(65536).use { output ->
+                    val buffer = ByteArray(65536)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                        done += read
+                        onProgress(done)
+                    }
+                }
+            }
+            // Preserve permissions and mtime
+            to.setLastModified(from.lastModified())
+        }
+
+        if (src.isDirectory) {
+            src.walkTopDown().forEach { f ->
+                val rel = f.relativeTo(src)
+                val target = File(dst, rel.path)
+                if (f.isDirectory) target.mkdirs() else doCopyFile(f, target)
+            }
+        } else {
+            doCopyFile(src, dst)
+        }
+    }
+
+    /** Delete with byte-level progress reporting. */
+    fun deleteWithProgress(
+        path: String,
+        onProgress: (bytesDeleted: Long) -> Unit
+    ): Result<Unit> = runCatching {
+        val root = File(path)
+        var done = 0L
+        root.walkBottomUp().forEach { f ->
+            val size = if (f.isFile) f.length() else 0L
+            if (!f.delete()) throw Exception("delete failed: ${f.absolutePath}")
+            done += size
+            onProgress(done)
+        }
+    }
+
+    /**
+     * Move via rename(); returns (result, renameRecord) where renameRecord is
+     * non-null when an atomic rename happened (oldPath to newPath), enabling undo.
+     */
+    fun moveWithRenameRecord(source: String, destination: String): Pair<Result<Unit>, Pair<String, String>?> {
+        return try {
+            if (NativeFileOps.rename(source, destination)) {
+                Result.success(Unit) to (source to destination)
+            } else {
+                // Cross-filesystem fallback
+                copy(source, destination).getOrThrow()
+                delete(source).getOrThrow()
+                Result.success(Unit) to null
+            }
+        } catch (e: Exception) {
+            Result.failure(e) to null
+        }
+    }
+
+
     fun move(source: String, destination: String): Result<Unit> = runCatching {
         // rename() is atomic on same FS, falls back to copy+delete
         if (!NativeFileOps.rename(source, destination)) {

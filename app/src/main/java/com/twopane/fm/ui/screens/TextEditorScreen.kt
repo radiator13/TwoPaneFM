@@ -1,5 +1,6 @@
 package com.twopane.fm.ui.screens
 
+import androidx.activity.compose.BackHandler
 import com.twopane.fm.viewmodel.FileExplorerViewModel
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -16,6 +17,7 @@ import com.twopane.fm.ui.components.EditorUndoStack
 import com.twopane.fm.ui.components.VirtualizedCodeEditor
 import com.twopane.fm.ui.components.detectSyntaxMode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -53,10 +55,14 @@ fun TextEditorScreen(
     // Go-to-line dialog
     var showGoToLine by remember { mutableStateOf(false) }
     var goToLineInput by remember { mutableStateOf("") }
+    var jumpToLine by remember { mutableIntStateOf(-1) }
 
     // Save As dialog
     var showSaveAs by remember { mutableStateOf(false) }
     var saveAsPath by remember { mutableStateOf(filePath) }
+
+    // Dirty-state guard
+    var showDiscardConfirm by remember { mutableStateOf(false) }
 
     // Cursor position (line-based)
     var cursorLine by remember { mutableIntStateOf(1) }
@@ -70,6 +76,39 @@ fun TextEditorScreen(
     // Track original content for dirty detection
     var originalContent by remember { mutableStateOf("") }
 
+    fun loadContent(path: String, encoding: String, announce: String?) {
+        scope.launch {
+            isBusy = true
+            if (announce != null) statusText = announce
+            withContext(Dispatchers.IO) {
+                try {
+                    val file = File(path)
+                    if (!file.exists()) {
+                        loadError = "File not found: $path"
+                        lines = listOf()
+                    } else {
+                        fileSizeKB = file.length() / 1024
+                        val charset = Charset.forName(encoding)
+                        val content = InputStreamReader(file.inputStream(), charset).use { it.readText() }
+                        originalContent = content
+                        lines = content.split("\n")
+                        lineCount = lines.size
+                        charCount = content.length.toLong()
+                        jumpToLine = -1
+                        undoStack.clear()
+                        undoStack.push(content)
+                        loadError = null
+                    }
+                } catch (e: Exception) {
+                    loadError = "Error reading: ${e.message}"
+                    lines = listOf()
+                }
+            }
+            isModified = false
+            isBusy = false
+        }
+    }
+
     // Load file
     LaunchedEffect(filePath) {
         withContext(Dispatchers.IO) {
@@ -82,11 +121,8 @@ fun TextEditorScreen(
                 }
 
                 fileSizeKB = file.length() / 1024
-
-                // Auto-detect encoding
                 selectedEncoding = detectEncoding(file)
 
-                // Read file content
                 val charset = Charset.forName(selectedEncoding)
                 val content = InputStreamReader(file.inputStream(), charset).use { it.readText() }
                 originalContent = content
@@ -107,25 +143,36 @@ fun TextEditorScreen(
     // Derive full content from lines
     val fullContent = remember(lines) { lines.joinToString("\n") }
 
-    // Track modifications
+    // Track modifications + push undo states (debounced)
     LaunchedEffect(fullContent) {
         isModified = fullContent != originalContent
+        delay(350)
+        undoStack.push(fullContent)
     }
+
+    fun requestBack() {
+        if (isModified && !readOnly) showDiscardConfirm = true else onBack()
+    }
+
+    BackHandler(enabled = !showDiscardConfirm) { requestBack() }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text(fileName, style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            fileName + if (isModified) " •" else "",
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
                         Text(filePath, style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { requestBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 },
@@ -162,23 +209,7 @@ fun TextEditorScreen(
                                     },
                                     onClick = {
                                         showEncodingMenu = false
-                                        scope.launch {
-                                            selectedEncoding = enc
-                                            withContext(Dispatchers.IO) {
-                                                try {
-                                                    val charset = Charset.forName(enc)
-                                                    val content = InputStreamReader(File(filePath).inputStream(), charset).use { it.readText() }
-                                                    originalContent = content
-                                                    lines = content.split("\n")
-                                                    lineCount = lines.size
-                                                    charCount = content.length.toLong()
-                                                    undoStack.clear()
-                                                    undoStack.push(content)
-                                                } catch (e: Exception) {
-                                                    statusText = "Encoding error: ${e.message}"
-                                                }
-                                            }
-                                        }
+                                        loadContent(filePath, enc, null)
                                     },
                                     leadingIcon = if (enc == selectedEncoding) {
                                         { Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary) }
@@ -204,26 +235,7 @@ fun TextEditorScreen(
                                 text = { Text("Reload") },
                                 onClick = {
                                     showMoreMenu = false
-                                    scope.launch {
-                                        isBusy = true; statusText = "Reloading..."
-                                        withContext(Dispatchers.IO) {
-                                            try {
-                                                val charset = Charset.forName(selectedEncoding)
-                                                val content = InputStreamReader(File(filePath).inputStream(), charset).use { it.readText() }
-                                                originalContent = content
-                                                lines = content.split("\n")
-                                                lineCount = lines.size
-                                                charCount = content.length.toLong()
-                                                undoStack.clear()
-                                                undoStack.push(content)
-                                                isModified = false
-                                                statusText = "Reloaded"
-                                            } catch (e: Exception) {
-                                                statusText = "Error: ${e.message}"
-                                            }
-                                        }
-                                        isBusy = false
-                                    }
+                                    loadContent(filePath, selectedEncoding, "Reloading...")
                                 },
                                 leadingIcon = { Icon(Icons.Default.Refresh, null) }
                             )
@@ -296,7 +308,18 @@ fun TextEditorScreen(
                 else -> VirtualizedCodeEditor(
                     lines = lines,
                     onLineChange = if (readOnly) null else { idx, newLine ->
-                        lines = lines.toMutableList().apply { set(idx, newLine) }
+                        // Multi-line safe: Enter/paste may embed '\n' inside one row
+                        lines = if (newLine.contains('\n')) {
+                            val parts = newLine.split('\n')
+                            lines.toMutableList().apply {
+                                removeAt(idx)
+                                addAll(idx, parts)
+                            }
+                        } else {
+                            lines.toMutableList().apply { set(idx, newLine) }
+                        }
+                        lineCount = lines.size
+                        charCount = lines.sumOf { it.length + 1 }.toLong()
                     },
                     onContentChange = if (readOnly) null else { newContent ->
                         lines = newContent.split("\n")
@@ -306,6 +329,11 @@ fun TextEditorScreen(
                     syntaxMode = syntaxMode,
                     undoStack = if (readOnly) null else undoStack,
                     wordWrap = wordWrap,
+                    highlightLineNum = jumpToLine - 1, // 1-based UI → 0-based index
+                    scrollToLine = jumpToLine - 1,
+                    onVisibleLineChange = { firstVisible ->
+                        if (jumpToLine < 0) cursorLine = firstVisible
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -324,7 +352,7 @@ fun TextEditorScreen(
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                     }
                     Spacer(Modifier.weight(1f))
-                    Text("Ln $cursorLine, Col $cursorCol",
+                    Text(if (cursorCol > 1 || cursorLine > 1) "Ln $cursorLine" else "",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                     Spacer(Modifier.width(8.dp))
@@ -365,6 +393,7 @@ fun TextEditorScreen(
                 TextButton(onClick = {
                     val line = goToLineInput.toIntOrNull()
                     if (line != null && line in 1..lineCount) {
+                        jumpToLine = line
                         cursorLine = line
                         cursorCol = 1
                         statusText = "Jumped to line $line"
@@ -411,6 +440,8 @@ fun TextEditorScreen(
                                         writer.write(fullContent)
                                     }
                                 }
+                                originalContent = fullContent
+                                isModified = false
                                 "Saved to $saveAsPath"
                             } catch (e: Exception) { "Error: ${e.message}" }
                         }
@@ -421,6 +452,42 @@ fun TextEditorScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showSaveAs = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Discard-changes confirmation
+    if (showDiscardConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDiscardConfirm = false },
+            title = { Text("Unsaved changes") },
+            text = { Text("Save changes to $fileName before leaving?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDiscardConfirm = false
+                    scope.launch {
+                        isBusy = true
+                        val ok = withContext(Dispatchers.IO) {
+                            try {
+                                val charset = Charset.forName(selectedEncoding)
+                                File(filePath).outputStream().use { out ->
+                                    java.io.OutputStreamWriter(out, charset).use { w -> w.write(fullContent) }
+                                }
+                                true
+                            } catch (_: Exception) { false }
+                        }
+                        isModified = !ok
+                        isBusy = false
+                        if (ok) onBack() else statusText = "Save failed — changes kept"
+                    }
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showDiscardConfirm = false
+                    isModified = false
+                    onBack()
+                }) { Text("Discard") }
             }
         )
     }

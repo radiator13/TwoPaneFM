@@ -77,6 +77,7 @@ fun FilePane(
     isActive: Boolean,
     viewMode: ViewMode,
     activeFilter: FilterType,
+    showThumbnails: Boolean = true,
     onActivate: () -> Unit,
     onItemClick: (FileEntry) -> Unit,
     onItemLongClick: (FileEntry) -> Unit,
@@ -90,6 +91,7 @@ fun FilePane(
     onClearSelection: () -> Unit,
     onInvertSelection: () -> Unit,
     onShare: () -> Unit,
+    onZip: (() -> Unit)? = null,
     onCompare: (() -> Unit)? = null,
     onBatchRename: (() -> Unit)? = null,
     onSortOrder: (SortOrder) -> Unit,
@@ -164,6 +166,7 @@ fun FilePane(
                         GridFileItem(
                             entry = entry,
                             isSelected = entry.path in paneState.selectedFiles,
+                            showThumbnail = showThumbnails && isMediaFile(entry.name),
                             onClick = { onItemClick(entry) },
                             onLongClick = { onItemLongClick(entry) }
                         )
@@ -175,6 +178,7 @@ fun FilePane(
                         FileItemRow(
                             entry = entry,
                             isSelected = entry.path in paneState.selectedFiles,
+                            showThumbnail = showThumbnails && isMediaFile(entry.name),
                             onClick = { onItemClick(entry) },
                             onLongClick = { onItemLongClick(entry) },
                             onShiftClick = { onRangeSelect(entry.path) }
@@ -239,6 +243,11 @@ fun FilePane(
                                 Icon(Icons.Default.Compare, "Compare", modifier = Modifier.size(20.dp))
                             }
                         }
+                        if (onZip != null) {
+                            IconButton(onClick = onZip, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Default.FolderZip, "Compress", modifier = Modifier.size(20.dp))
+                            }
+                        }
                         if (onBatchRename != null) {
                             IconButton(onClick = onBatchRename, modifier = Modifier.size(36.dp)) {
                                 Icon(Icons.Default.DriveFileRenameOutline, "Batch Rename", modifier = Modifier.size(20.dp))
@@ -265,6 +274,7 @@ fun FilePane(
 private fun FileItemRow(
     entry: FileEntry,
     isSelected: Boolean,
+    showThumbnail: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onShiftClick: () -> Unit
@@ -292,12 +302,18 @@ private fun FileItemRow(
             Spacer(Modifier.width(8.dp))
         }
 
-        Icon(
-            imageVector = iconForFile(entry),
-            contentDescription = null,
-            tint = if (entry.isDirectory) Color(0xFFFFA726) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-            modifier = Modifier.size(28.dp)
-        )
+        if (showThumbnail && !entry.isDirectory) {
+            Box(Modifier.width(40.dp)) {
+                FileThumbnail(entry = entry, size = 40.dp)
+            }
+        } else {
+            Icon(
+                imageVector = iconForFile(entry),
+                contentDescription = null,
+                tint = if (entry.isDirectory) Color(0xFFFFA726) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                modifier = Modifier.size(28.dp)
+            )
+        }
         Spacer(Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
@@ -337,6 +353,7 @@ private fun FileItemRow(
 private fun GridFileItem(
     entry: FileEntry,
     isSelected: Boolean,
+    showThumbnail: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -355,12 +372,17 @@ private fun GridFileItem(
             .padding(12.dp)
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                imageVector = iconForFile(entry),
-                contentDescription = null,
-                tint = if (entry.isDirectory) Color(0xFFFFA726) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                modifier = Modifier.size(40.dp)
-            )
+            if (showThumbnail && !entry.isDirectory) {
+                FileThumbnail(entry = entry, size = 48.dp,
+                    modifier = Modifier.width(48.dp).height(48.dp))
+            } else {
+                Icon(
+                    imageVector = iconForFile(entry),
+                    contentDescription = null,
+                    tint = if (entry.isDirectory) Color(0xFFFFA726) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    modifier = Modifier.size(40.dp)
+                )
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 text = entry.name,
@@ -378,6 +400,11 @@ private fun GridFileItem(
             }
         }
     }
+}
+
+private fun isMediaFile(name: String): Boolean {
+    val ext = name.substringAfterLast('.', "").lowercase()
+    return ext in setOf("jpg", "jpeg", "png", "gif", "bmp", "webp", "mp4", "mkv", "avi", "mov", "webm")
 }
 
 private fun iconForFile(entry: FileEntry): ImageVector {
