@@ -154,12 +154,11 @@ fun ArchiveBrowserScreen(
                             Triple(rel, isDir, entries.firstOrNull { e -> e.name == currentPrefix + (if (isDir) rel.substringBefore('/') + "/" else rel) })
                         }
                         .distinctBy { it.first }
-                        .sortedWith(compareBy<Pair<Triple<String, Boolean, ArchiveSupport.ArchiveEntry?>, Boolean>> { !it.second }.thenBy { it.first })
+                        .sortedWith(compareBy<Triple<String, Boolean, ArchiveSupport.ArchiveEntry?>> { !it.second }.thenBy { it.first })
                         .toList()
 
                     LazyColumn(Modifier.fillMaxSize()) {
-                        items(visible, key = { it.first }) { (rel, isDir, meta) ->
-                            ListItem(
+                        items(visible, key = { it.first }) { (rel, isDir, meta) ->                            ListItem(
                                 headlineContent = { Text(rel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 supportingContent = {
                                     if (!isDir && meta != null) {

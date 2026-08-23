@@ -137,7 +137,8 @@ object FileUtils {
     fun moveWithRenameRecord(source: String, destination: String): Pair<Result<Unit>, Pair<String, String>?> {
         return try {
             if (NativeFileOps.rename(source, destination)) {
-                Result.success(Unit) to (source to destination)
+                val record: Pair<String, String> = source to destination
+                Result.success(Unit) to record
             } else {
                 // Cross-filesystem fallback
                 copy(source, destination).getOrThrow()
@@ -145,7 +146,7 @@ object FileUtils {
                 Result.success(Unit) to null
             }
         } catch (e: Exception) {
-            Result.failure(e) to null
+            Result.failure<Unit>(e) to null
         }
     }
 

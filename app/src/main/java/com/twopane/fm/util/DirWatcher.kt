@@ -19,7 +19,6 @@ class DirWatcher(
         observer = object : FileObserver(path, CREATE or DELETE or MOVED_FROM or MOVED_TO or MODIFY or ATTRIB or DELETE_SELF or MOVE_SELF) {
             override fun onEvent(event: Int, p: String?) {
                 if (closed.get()) return
-                if (event == IGNORED) { close(); return }
                 debounce()
             }
         }.also { it.startWatching() }

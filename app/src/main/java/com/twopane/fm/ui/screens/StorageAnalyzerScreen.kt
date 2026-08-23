@@ -37,15 +37,12 @@ fun StorageAnalyzerScreen(
 
     suspend fun analyze(path: String) {
         isLoading = true
-        val computed = withContext(Dispatchers.IO) {
-            File(path).listFiles()
-                ?.orEmpty()
-                .map { child ->
-                    val size = if (child.isDirectory) FileUtils.diskUsage(child.absolutePath) else child.length()
-                    child.name to size
-                }
-                ?.sortedByDescending { it.second }
-                ?: emptyList()
+        val computed: List<Pair<String, Long>> = withContext(Dispatchers.IO) {
+            val children: Array<File> = File(path).listFiles() ?: emptyArray()
+            children.map { child ->
+                val size = if (child.isDirectory) FileUtils.diskUsage(child.absolutePath) else child.length()
+                child.name to size
+            }.sortedByDescending { it.second }
         }
         results = computed
         total = computed.sumOf { it.second }

@@ -27,6 +27,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -327,6 +328,7 @@ fun VirtualizedCodeEditor(
     }
     var matchPos by remember { mutableStateOf(0) }
     LaunchedEffect(matchedLines) { matchPos = 0 }
+    val scope = rememberCoroutineScope()
 
     // Active highlighted line: explicit jump wins, else current find match
     val activeHighlight = remember(highlightLineNum, matchedLines, matchPos) {
@@ -382,7 +384,8 @@ fun VirtualizedCodeEditor(
                             onClick = {
                                 if (matchedLines.isNotEmpty()) {
                                     matchPos = if (matchPos - 1 < 0) matchedLines.size - 1 else matchPos - 1
-                                    listState.scrollToItem(matchedLines[matchPos].coerceAtMost(max(0, lines.size - 3)), 0)
+                                    val target = matchedLines[matchPos].coerceAtMost(max(0, lines.size - 3))
+                                    scope.launch { listState.scrollToItem(target, 0) }
                                 }
                             },
                             enabled = matchedLines.isNotEmpty(),
@@ -392,7 +395,8 @@ fun VirtualizedCodeEditor(
                             onClick = {
                                 if (matchedLines.isNotEmpty()) {
                                     matchPos = (matchPos + 1) % matchedLines.size
-                                    listState.scrollToItem(matchedLines[matchPos].coerceAtMost(max(0, lines.size - 3)), 0)
+                                    val target = matchedLines[matchPos].coerceAtMost(max(0, lines.size - 3))
+                                    scope.launch { listState.scrollToItem(target, 0) }
                                 }
                             },
                             enabled = matchedLines.isNotEmpty(),
